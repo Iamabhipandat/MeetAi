@@ -58,17 +58,22 @@ app.include_router(analytics.router,   prefix=settings.API_V1_STR)
 app.include_router(rooms.router,       prefix=settings.API_V1_STR)
 
 
-# ── WebSocket ─────────────────────────────────────────────────────────────────
+import json
+
+# ── WebSocket for Real-time Signaling & Meeting Events ────────────────────────
 @app.websocket("/ws/meetings/{meeting_id}")
-async def websocket_endpoint(websocket: WebSocket, meeting_id: int):
+async def websocket_endpoint(websocket: WebSocket, meeting_id: str):
     await manager.connect(websocket, meeting_id)
     try:
         while True:
             data = await websocket.receive_text()
-            # Echo or process incoming socket messages
-            await manager.broadcast_to_meeting(meeting_id, {
-                "type": "chat_message",
-                "raw": data
-            })
+            try:
+                payload = json.loads(data)
+            except Exception:
+                payload = {"type": "chat_message", "raw": data}
+            await manager.broadcast_to_meeting(meeting_id, payload, sender_ws=websocket)
     except WebSocketDisconnect:
+        manager.disconnect(websocket, meeting_id)
+        await manager.broadcast_to_meeting(meeting_id, {"type": "peer_left"})
+    except Exception:
         manager.disconnect(websocket, meeting_id)

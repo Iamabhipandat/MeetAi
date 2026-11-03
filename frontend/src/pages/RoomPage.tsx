@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import QAPanel from '../components/QAPanel'
 import {
@@ -16,21 +16,36 @@ import {
   X,
   Info,
   Users,
-  MessageSquare,
-  Hand,
   Smile,
   MoreVertical,
   Subtitles,
-  Lock
+  Hand
 } from 'lucide-react'
 import clsx from 'clsx'
+
+interface RemotePeer {
+  id: string
+  name: string
+  stream?: MediaStream
+  micOn: boolean
+  camOn: boolean
+}
+
+const RTC_CONFIG: RTCConfiguration = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+  ],
+}
 
 export default function RoomPage() {
   const { code } = useParams<{ code: string }>()
   const location = useLocation()
   const nav = useNavigate()
 
-  // Google Meet style formatted code (e.g. zbp-pnjs-tsv)
+  // Google Meet formatted code (e.g. zbp-pnjs-tsv)
   const defaultCode = () => {
     const p1 = Math.random().toString(36).substring(2, 5)
     const p2 = Math.random().toString(36).substring(2, 6)
@@ -39,9 +54,11 @@ export default function RoomPage() {
   }
 
   const meetingCode = code || defaultCode()
-  const roomName = location.state?.roomName || 'AI Video Meeting'
-  const myName = location.state?.participantName || localStorage.getItem('meet_user_name') || 'You'
-  const myEmail = localStorage.getItem('meet_user_email') || 'guest@meetai.io'
+  const myName = location.state?.participantName || localStorage.getItem('meet_user_name') || 'Guest'
+  const myEmail = localStorage.getItem('meet_user_email') || `${myName.toLowerCase().replace(/\s+/g, '')}@meetai.io`
+
+  // Stable random Peer ID for this session
+  const myPeerId = useRef('peer_' + Math.random().toString(36).substring(2, 9)).current
 
   // Device & Permission states
   const [showPermissionPrompt, setShowPermissionPrompt] = useState(true)
@@ -57,13 +74,21 @@ export default function RoomPage() {
   // Floating "Your meeting's ready" card
   const [showReadyCard, setShowReadyCard] = useState(false)
   const [copiedLink, setCopiedLink] = useState(false)
+  const [notification, setNotification] = useState<string | null>(null)
 
   // Sidebars
   const [activeSideTab, setActiveSideTab] = useState<'qa' | 'chat' | 'people' | null>(null)
 
-  // WebRTC MediaStream
+  // Media Streams & WebRTC
   const localVideoRef = useRef<HTMLVideoElement | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null)
+  const [remotePeer, setRemotePeer] = useState<RemotePeer | null>(null)
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
+
+  // Signaling channels (Dual: BroadcastChannel for same-machine tabs + WebSocket for cross-network)
+  const bcRef = useRef<BroadcastChannel | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
 
   // Clock
   const [currentTime, setCurrentTime] = useState('')
@@ -80,20 +105,244 @@ export default function RoomPage() {
     return () => clearInterval(timer)
   }, [])
 
-  // Start real camera and mic
+  // Show auto-dismiss notification toast
+  const showToast = (msg: string) => {
+    setNotification(msg)
+    setTimeout(() => setNotification(null), 3500)
+  }
+
+  // ── 1. SEND SIGNAL HELPER ──────────────────────────────────────────
+  const sendSignal = useCallback((msg: any) => {
+    const payload = { ...msg, sender: myPeerId, room: meetingCode }
+    // BroadcastChannel (cross-tab on same machine)
+    try {
+      bcRef.current?.postMessage(payload)
+    } catch {}
+
+    // WebSocket (server relay)
+    try {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify(payload))
+      }
+    } catch {}
+  }, [meetingCode, myPeerId])
+
+  // ── 2. WEBRTC PEER CONNECTION CREATION ────────────────────────────
+  const createPeerConnection = useCallback((remoteId: string, remoteName: string) => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close()
+    }
+
+    const pc = new RTCPeerConnection(RTC_CONFIG)
+    peerConnectionRef.current = pc
+
+    // Add local tracks to peer connection
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current!)
+      })
+    }
+
+    // ICE Candidates
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendSignal({
+          type: 'ice_candidate',
+          target: remoteId,
+          candidate: event.candidate,
+        })
+      }
+    }
+
+    // Remote Track handler: THE OTHER PERSON'S LIVE FACE & VOICE!
+    pc.ontrack = (event) => {
+      console.log('Got remote stream track:', event.track.kind)
+      const remoteStream = event.streams[0] || new MediaStream([event.track])
+      setRemotePeer(prev => ({
+        id: remoteId,
+        name: remoteName || prev?.name || 'Participant',
+        stream: remoteStream,
+        micOn: prev?.micOn ?? true,
+        camOn: prev?.camOn ?? true,
+      }))
+
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStream
+      }
+    }
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed') {
+        setRemotePeer(null)
+      }
+    }
+
+    return pc
+  }, [sendSignal])
+
+  // ── 3. SIGNALING MESSAGE HANDLER ──────────────────────────────────
+  const handleSignalMessage = useCallback(async (msg: any) => {
+    if (!msg || msg.sender === myPeerId) return
+
+    switch (msg.type) {
+      case 'peer_ready': {
+        // A peer has arrived and is ready for audio/video
+        showToast(`${msg.name || 'A participant'} joined the meeting`)
+        // The peer with smaller string ID acts as the polite offerer
+        if (myPeerId < msg.sender) {
+          const pc = createPeerConnection(msg.sender, msg.name)
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          sendSignal({
+            type: 'offer',
+            target: msg.sender,
+            offer: offer,
+            name: myName,
+          })
+        } else {
+          // Announce back so the offerer knows our name
+          sendSignal({
+            type: 'peer_ack',
+            target: msg.sender,
+            name: myName,
+          })
+        }
+        break
+      }
+
+      case 'peer_ack': {
+        if (msg.target === myPeerId && myPeerId < msg.sender) {
+          const pc = createPeerConnection(msg.sender, msg.name)
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+          sendSignal({
+            type: 'offer',
+            target: msg.sender,
+            offer: offer,
+            name: myName,
+          })
+        }
+        break
+      }
+
+      case 'offer': {
+        if (msg.target && msg.target !== myPeerId) return
+        const pc = createPeerConnection(msg.sender, msg.name)
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.offer))
+        const answer = await pc.createAnswer()
+        await pc.setLocalDescription(answer)
+        sendSignal({
+          type: 'answer',
+          target: msg.sender,
+          answer: answer,
+          name: myName,
+        })
+        break
+      }
+
+      case 'answer': {
+        if (msg.target && msg.target !== myPeerId) return
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(msg.answer))
+        }
+        break
+      }
+
+      case 'ice_candidate': {
+        if (msg.target && msg.target !== myPeerId) return
+        if (peerConnectionRef.current && msg.candidate) {
+          try {
+            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(msg.candidate))
+          } catch (e) {
+            console.warn('Error adding ICE candidate:', e)
+          }
+        }
+        break
+      }
+
+      case 'device_state': {
+        setRemotePeer(prev => {
+          if (!prev) return null
+          return {
+            ...prev,
+            micOn: msg.micOn ?? prev.micOn,
+            camOn: msg.camOn ?? prev.camOn,
+          }
+        })
+        break
+      }
+
+      case 'peer_left': {
+        showToast('Participant left the meeting')
+        setRemotePeer(null)
+        if (remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = null
+        }
+        break
+      }
+
+      default:
+        break
+    }
+  }, [createPeerConnection, myName, myPeerId, sendSignal])
+
+  // ── 4. SETUP SIGNALING (BROADCASTCHANNEL + WEBSOCKET) ─────────────
+  useEffect(() => {
+    // A) BroadcastChannel
+    const bc = new BroadcastChannel(`meetai_room_${meetingCode}`)
+    bcRef.current = bc
+    bc.onmessage = (event) => {
+      handleSignalMessage(event.data)
+    }
+
+    // B) WebSocket to backend (fallback / cross-device)
+    let ws: WebSocket | null = null
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+      const host = window.location.hostname === 'localhost' ? 'localhost:8000' : window.location.host
+      ws = new WebSocket(`${protocol}//${host}/ws/meetings/${meetingCode}`)
+      wsRef.current = ws
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data)
+          handleSignalMessage(data)
+        } catch {}
+      }
+    } catch (e) {
+      console.warn('WebSocket connection error:', e)
+    }
+
+    return () => {
+      sendSignal({ type: 'peer_left' })
+      bc.close()
+      ws?.close()
+      peerConnectionRef.current?.close()
+      localStreamRef.current?.getTracks().forEach(t => t.stop())
+    }
+  }, [handleSignalMessage, meetingCode, sendSignal])
+
+  // Re-attach remote stream to video element when state changes
+  useEffect(() => {
+    if (remotePeer?.stream && remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = remotePeer.stream
+    }
+  }, [remotePeer?.stream])
+
+  // ── 5. MEDIA ACCESS INITIALIZER ───────────────────────────────────
   const requestMediaAccess = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          facingMode: 'user'
+          facingMode: 'user',
         },
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
-        }
+          autoGainControl: true,
+        },
       })
 
       localStreamRef.current = stream
@@ -104,8 +353,11 @@ export default function RoomPage() {
       if (localVideoRef.current) {
         localVideoRef.current.srcObject = stream
       }
+
+      // Broadcast peer ready so anyone in the room connects with WebRTC
+      sendSignal({ type: 'peer_ready', name: myName })
     } catch (err) {
-      console.warn('Camera/Mic permission denied or not found:', err)
+      console.warn('Camera/Mic permission denied or unavailable:', err)
       setHasPermission(false)
       setMicOn(false)
       setCamOn(false)
@@ -115,36 +367,37 @@ export default function RoomPage() {
     }
   }
 
-  // User chose to continue without camera/mic
   const continueWithoutMedia = () => {
     setHasPermission(false)
     setMicOn(false)
     setCamOn(false)
     setShowPermissionPrompt(false)
     setShowReadyCard(true)
+    sendSignal({ type: 'peer_ready', name: myName })
   }
 
-  // Toggle Mic Audio Track
+  // ── 6. CONTROLS TOGGLE (WITH REAL-TIME BROADCAST) ─────────────────
   const toggleMic = () => {
     if (localStreamRef.current) {
-      const audioTracks = localStreamRef.current.getAudioTracks()
-      audioTracks.forEach(track => {
-        track.enabled = !micOn
+      const newMic = !micOn
+      localStreamRef.current.getAudioTracks().forEach(track => {
+        track.enabled = newMic
       })
-      setMicOn(!micOn)
+      setMicOn(newMic)
+      sendSignal({ type: 'device_state', micOn: newMic, camOn })
     } else if (!hasPermission) {
       requestMediaAccess()
     }
   }
 
-  // Toggle Camera Video Track
   const toggleCam = () => {
     if (localStreamRef.current) {
-      const videoTracks = localStreamRef.current.getVideoTracks()
-      videoTracks.forEach(track => {
-        track.enabled = !camOn
+      const newCam = !camOn
+      localStreamRef.current.getVideoTracks().forEach(track => {
+        track.enabled = newCam
       })
-      setCamOn(!camOn)
+      setCamOn(newCam)
+      sendSignal({ type: 'device_state', micOn, camOn: newCam })
     } else if (!hasPermission) {
       requestMediaAccess()
     }
@@ -158,10 +411,23 @@ export default function RoomPage() {
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = screenStream
         }
+        // Replace video track in peer connection
+        if (peerConnectionRef.current) {
+          const screenTrack = screenStream.getVideoTracks()[0]
+          const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === 'video')
+          if (sender) {
+            sender.replaceTrack(screenTrack)
+          }
+        }
         setScreenSharing(true)
         screenStream.getVideoTracks()[0].onended = () => {
           if (localVideoRef.current && localStreamRef.current) {
             localVideoRef.current.srcObject = localStreamRef.current
+            if (peerConnectionRef.current) {
+              const camTrack = localStreamRef.current.getVideoTracks()[0]
+              const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === 'video')
+              if (sender && camTrack) sender.replaceTrack(camTrack)
+            }
           }
           setScreenSharing(false)
         }
@@ -171,12 +437,16 @@ export default function RoomPage() {
     } else {
       if (localVideoRef.current && localStreamRef.current) {
         localVideoRef.current.srcObject = localStreamRef.current
+        if (peerConnectionRef.current) {
+          const camTrack = localStreamRef.current.getVideoTracks()[0]
+          const sender = peerConnectionRef.current.getSenders().find(s => s.track?.kind === 'video')
+          if (sender && camTrack) sender.replaceTrack(camTrack)
+        }
       }
       setScreenSharing(false)
     }
   }
 
-  // Reaction trigger
   const triggerReaction = (emoji: string) => {
     setSelectedReaction(emoji)
     setShowReactions(false)
@@ -193,50 +463,41 @@ export default function RoomPage() {
 
   return (
     <div className="h-screen w-screen bg-[#202124] text-white flex flex-col overflow-hidden select-none font-sans relative">
+      {/* ── TOAST NOTIFICATION ────────────────────────────────────────── */}
+      {notification && (
+        <div className="absolute top-5 left-1/2 -translate-x-1/2 bg-[#3C4043] text-white px-5 py-2.5 rounded-full shadow-2xl text-xs font-medium z-50 animate-in fade-in slide-in-from-top-4 flex items-center gap-2 border border-white/10">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+          <span>{notification}</span>
+        </div>
+      )}
+
       {/* ── 1. INITIAL PERMISSION POPUP (EXACT GOOGLE MEET DESIGN) ───────── */}
       {showPermissionPrompt && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white text-[#202124] rounded-[28px] max-w-[560px] w-full p-8 md:p-10 shadow-2xl flex flex-col items-center text-center animate-in fade-in zoom-in-95 duration-200">
-            {/* Friendly Google Meet style illustration */}
+            {/* Friendly Google Meet illustration */}
             <div className="w-full max-w-[340px] h-44 flex items-center justify-center relative mb-4">
               <svg viewBox="0 0 400 240" className="w-full h-full" fill="none">
-                {/* Desk Base Line */}
                 <path d="M 40 210 L 360 210" stroke="#E0E0E0" strokeWidth="3" strokeLinecap="round" />
-
-                {/* Left Person (Participant with braided hair) */}
                 <path d="M 90 210 C 90 180 110 165 130 160 C 145 156 160 165 170 175 L 180 210" fill="#E8F0FE" stroke="#202124" strokeWidth="2.5" />
                 <circle cx="140" cy="120" r="24" fill="#FCE8E6" stroke="#202124" strokeWidth="2.5" />
-                {/* Hair Braid */}
                 <circle cx="112" cy="126" r="11" fill="#202124" />
                 <circle cx="102" cy="140" r="10" fill="#202124" />
                 <circle cx="94" cy="156" r="9" fill="#202124" />
                 <circle cx="88" cy="172" r="8" fill="#202124" />
-
-                {/* Right Computer Monitor Screen */}
                 <rect x="200" y="70" width="150" height="110" rx="8" fill="#FFFFFF" stroke="#202124" strokeWidth="2.5" />
                 <path d="M 275 180 L 275 210 M 250 210 L 300 210" stroke="#202124" strokeWidth="2.5" strokeLinecap="round" />
-
-                {/* Person Inside Monitor */}
                 <path d="M 230 180 C 230 155 245 145 275 145 C 305 145 320 155 320 180" fill="#D2E3FC" stroke="#202124" strokeWidth="2" />
                 <circle cx="275" cy="115" r="18" fill="#F6AEA9" stroke="#202124" strokeWidth="2" />
                 <path d="M 260 102 C 265 92 285 92 290 102" fill="#202124" />
-
-                {/* Speech / Media Permission Bubble */}
                 <g transform="translate(180, 20)">
-                  {/* Outer glow rays */}
                   <line x1="10" y1="18" x2="0" y2="10" stroke="#1A73E8" strokeWidth="2.5" strokeLinecap="round" />
                   <line x1="26" y1="6" x2="26" y2="-4" stroke="#1A73E8" strokeWidth="2.5" strokeLinecap="round" />
                   <line x1="42" y1="18" x2="52" y2="10" stroke="#1A73E8" strokeWidth="2.5" strokeLinecap="round" />
-
-                  {/* Bubble Container */}
                   <rect x="-10" y="8" width="88" height="52" rx="26" fill="#FFFFFF" stroke="#202124" strokeWidth="2.5" />
-                  
-                  {/* Blue Video Camera Circle */}
                   <circle cx="16" cy="34" r="18" fill="#1A73E8" />
                   <rect x="9" y="27" width="10" height="14" rx="2" fill="white" />
                   <polygon points="19,30 25,26 25,42 19,38" fill="white" />
-
-                  {/* Red Microphone Circle */}
                   <circle cx="52" cy="34" r="18" fill="#EA4335" />
                   <rect x="48" y="27" width="8" height="11" rx="4" fill="white" />
                   <path d="M 45 33 C 45 38 59 38 59 33" stroke="white" strokeWidth="2" fill="none" />
@@ -245,25 +506,19 @@ export default function RoomPage() {
               </svg>
             </div>
 
-            {/* Prompt Heading */}
             <h2 className="text-[22px] md:text-[24px] font-normal text-[#202124] leading-snug tracking-tight mb-2">
               Do you want people to see and hear you in the meeting?
             </h2>
-
-            {/* Prompt Subtitle */}
             <p className="text-sm text-[#5F6368] font-normal mb-8 max-w-md">
               You can turn off your microphone and camera any time you want.
             </p>
 
-            {/* Primary Action Button */}
             <button
               onClick={requestMediaAccess}
               className="w-auto px-8 py-3 rounded-full bg-[#1A73E8] hover:bg-[#1557B0] text-white font-medium text-sm transition-all shadow-sm hover:shadow cursor-pointer"
             >
               Allow microphone and camera
             </button>
-
-            {/* Secondary Text Link */}
             <button
               onClick={continueWithoutMedia}
               className="text-sm font-medium text-[#1A73E8] hover:underline mt-4 cursor-pointer bg-transparent border-none py-1"
@@ -274,49 +529,81 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* ── 2. MAIN MEETING VIEW ─────────────────────────────────────────── */}
+      {/* ── 2. MAIN MEETING VIEW (MULTI-PEER VIDEO GRID) ────────────────── */}
       <div className="flex-1 flex min-h-0 relative p-4 gap-3 overflow-hidden">
-        {/* Central Stage Canvas */}
-        <div className="flex-1 flex flex-col min-h-0 min-w-0 relative rounded-2xl overflow-hidden bg-[#131314] border border-white/5 shadow-2xl">
-          {/* Main User Video Tile */}
-          <div className="w-full h-full relative flex items-center justify-center bg-[#131314]">
+        {/* Dynamic Video Stage: 1 Person (Center) or 2 People (Side-by-Side Grid) */}
+        <div className="flex-1 flex min-h-0 min-w-0 relative rounded-2xl overflow-hidden bg-[#131314] border border-white/5 shadow-2xl p-2 gap-2">
+          
+          {/* TILE 1: REMOTE PARTICIPANT (THE OTHER PERSON'S LIVE FACE) */}
+          {remotePeer && (
+            <div className="flex-1 h-full relative rounded-xl overflow-hidden bg-[#1E1F22] flex items-center justify-center border border-white/10">
+              {remotePeer.camOn && remotePeer.stream ? (
+                <video
+                  ref={remoteVideoRef}
+                  autoPlay
+                  playsInline
+                  className="w-full h-full object-cover rounded-xl"
+                />
+              ) : (
+                /* Remote Participant Avatar Circle when Camera is OFF */
+                <div className="flex flex-col items-center justify-center gap-3">
+                  <div className="w-28 h-28 rounded-full bg-gradient-to-tr from-cyan-600 to-indigo-600 flex items-center justify-center text-4xl font-normal text-white shadow-xl">
+                    {remotePeer.name[0]?.toUpperCase() || 'P'}
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-300 bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
+                    {remotePeer.micOn ? <Mic className="w-3.5 h-3.5 text-emerald-400" /> : <MicOff className="w-3.5 h-3.5 text-rose-400" />}
+                    <span>{remotePeer.camOn ? 'Live Stream' : 'Camera is off'}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Remote Peer Name Badge (Bottom-Left) */}
+              <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white border border-white/10 z-10">
+                <span className={clsx('w-2 h-2 rounded-full', remotePeer.micOn ? 'bg-emerald-400' : 'bg-rose-500')} />
+                <span>{remotePeer.name}</span>
+              </div>
+            </div>
+          )}
+
+          {/* TILE 2: LOCAL USER (YOU) */}
+          <div className="flex-1 h-full relative rounded-xl overflow-hidden bg-[#1E1F22] flex items-center justify-center border border-white/10">
             {camOn && hasPermission ? (
               <video
                 ref={localVideoRef}
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover scale-x-[-1] rounded-2xl"
+                className="w-full h-full object-cover scale-x-[-1] rounded-xl"
               />
             ) : (
-              /* Google Meet Avatar Circle when Camera is OFF */
+              /* Local User Avatar Circle when Camera is OFF */
               <div className="flex flex-col items-center justify-center gap-3">
-                <div className="w-32 h-32 rounded-full bg-[#004D40] flex items-center justify-center text-5xl font-normal text-white shadow-xl ring-4 ring-white/5">
+                <div className="w-28 h-28 rounded-full bg-[#004D40] flex items-center justify-center text-4xl font-normal text-white shadow-xl ring-4 ring-white/5">
                   {myName[0]?.toUpperCase() || 'A'}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-300 bg-black/40 px-3 py-1 rounded-full backdrop-blur-sm">
                   {micOn ? <Mic className="w-3.5 h-3.5 text-emerald-400" /> : <MicOff className="w-3.5 h-3.5 text-rose-400" />}
-                  <span>{camOn ? 'Connecting camera…' : 'Camera is off'}</span>
+                  <span>{camOn ? 'Connecting camera…' : 'Your camera is off'}</span>
                 </div>
               </div>
             )}
 
-            {/* Local User Badge (Bottom-Left of Video Tile) */}
-            <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white border border-white/10">
+            {/* Local User Badge (Bottom-Left) */}
+            <div className="absolute bottom-4 left-4 flex items-center gap-2 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg text-xs font-medium text-white border border-white/10 z-10">
               <span className={clsx('w-2 h-2 rounded-full', micOn ? 'bg-emerald-400' : 'bg-rose-500')} />
               <span>{myName} (You)</span>
             </div>
 
             {/* Floating Reaction Animation */}
             {selectedReaction && (
-              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 text-6xl animate-bounce">
+              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 text-6xl animate-bounce z-20">
                 {selectedReaction}
               </div>
             )}
 
             {/* Hand Raised Indicator */}
             {handRaised && (
-              <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-amber-500/90 text-black px-3 py-1.5 rounded-full text-xs font-bold shadow-lg animate-pulse">
+              <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-amber-500/90 text-black px-3 py-1.5 rounded-full text-xs font-bold shadow-lg animate-pulse z-20">
                 <Hand className="w-4 h-4" />
                 <span>Hand Raised</span>
               </div>
@@ -324,10 +611,9 @@ export default function RoomPage() {
           </div>
         </div>
 
-        {/* ── 3. GOOGLE MEET FLOATING "YOUR MEETING'S READY" CARD ───────── */}
-        {showReadyCard && (
+        {/* ── 3. FLOATING "YOUR MEETING'S READY" CARD (WHEN ALONE) ──────── */}
+        {showReadyCard && !remotePeer && (
           <div className="absolute bottom-4 left-6 z-40 w-[350px] bg-white rounded-lg p-5 shadow-2xl border border-gray-100 text-[#202124] animate-in fade-in slide-in-from-bottom-4 duration-200">
-            {/* Header with Title and Close X */}
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-base text-[#202124]">Your meeting's ready</h3>
               <button
@@ -339,7 +625,6 @@ export default function RoomPage() {
               </button>
             </div>
 
-            {/* Add Others Button */}
             <button
               onClick={copyMeetingLink}
               className="flex items-center gap-2 px-4 py-2 bg-[#1A73E8] hover:bg-[#1557B0] text-white rounded-full text-xs font-medium my-2 transition-colors cursor-pointer shadow-sm"
@@ -348,12 +633,10 @@ export default function RoomPage() {
               <span>Add others</span>
             </button>
 
-            {/* Share link instruction */}
             <p className="text-xs text-[#5F6368] leading-relaxed mb-3">
               Or share this meeting link with others that you want in the meeting
             </p>
 
-            {/* Meeting Link Box with Copy Button */}
             <div className="flex items-center justify-between gap-2 bg-[#F1F3F4] rounded-md px-3 py-2 text-xs font-sans border border-transparent hover:border-gray-300 transition-colors">
               <span className="text-[#3C4043] truncate flex-1 select-all font-mono text-[11px]">
                 {joinUrl}
@@ -370,13 +653,11 @@ export default function RoomPage() {
               <p className="text-[11px] text-emerald-600 font-medium mt-1">Link copied to clipboard!</p>
             )}
 
-            {/* Permission Security Hint */}
             <div className="flex items-start gap-2 mt-3 pt-3 border-t border-gray-100 text-[11px] text-[#5F6368] leading-normal">
               <ShieldCheck className="w-4 h-4 text-[#1A73E8] shrink-0 mt-0.5" />
-              <span>People who use this meeting link can join directly with real camera and microphone.</span>
+              <span>People who open this link will automatically connect with real video and audio.</span>
             </div>
 
-            {/* Joined as identity */}
             <div className="text-[11px] text-[#70757A] mt-2 truncate">
               Joined as {myEmail}
             </div>
@@ -407,7 +688,7 @@ export default function RoomPage() {
 
       {/* ── 5. GOOGLE MEET BOTTOM CONTROL BAR ────────────────────────────── */}
       <footer className="h-20 bg-[#202124] px-6 flex items-center justify-between shrink-0 z-40 border-t border-white/5">
-        {/* Left: Clock | Meeting Code (e.g. 22:08 | zbp-pnjs-tsv) */}
+        {/* Left: Clock | Meeting Code */}
         <div className="flex items-center gap-3 text-sm font-medium text-slate-200 min-w-[200px]">
           <span>{currentTime || '22:08'}</span>
           <span className="text-slate-500">|</span>
@@ -528,7 +809,6 @@ export default function RoomPage() {
 
         {/* Right: Info, People, Chat, Gemini AI Sidebar Toggles */}
         <div className="flex items-center gap-1 min-w-[200px] justify-end">
-          {/* Details / Link popup toggle */}
           <button
             onClick={() => setShowReadyCard(c => !c)}
             className={clsx(
@@ -540,15 +820,14 @@ export default function RoomPage() {
             <Info className="w-5 h-5" />
           </button>
 
-          {/* Participants */}
           <button
             onClick={() => setShowReadyCard(true)}
             className="p-2.5 rounded-full text-slate-400 hover:text-white hover:bg-white/5 transition-colors relative cursor-pointer"
-            title="People (1)"
+            title={`People (${remotePeer ? 2 : 1})`}
           >
             <Users className="w-5 h-5" />
             <span className="absolute top-1 right-1 w-4 h-4 bg-[#1A73E8] rounded-full text-[10px] font-bold text-white grid place-items-center">
-              1
+              {remotePeer ? 2 : 1}
             </span>
           </button>
 
