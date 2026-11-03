@@ -1,88 +1,170 @@
 import { useState } from 'react'
-import { Navigate, Outlet } from 'react-router-dom'
+import { Navigate, Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
-import ZoomSidebar from './ZoomSidebar'
+import { useTheme } from '../contexts/ThemeContext'
 import CreateMeetingModal from './CreateMeetingModal'
-import { Search, ChevronLeft, ChevronRight, History, Plus, Bell, Sparkles } from 'lucide-react'
+import {
+  Video,
+  Phone,
+  HelpCircle,
+  Settings,
+  Grid,
+  Sun,
+  Moon,
+  LogOut,
+  Keyboard,
+  Plus
+} from 'lucide-react'
 
 export default function AppLayout() {
-  const { user, loading } = useAuth()
+  const { user, loading, logout } = useAuth()
+  const { theme, toggle } = useTheme()
+  const nav = useNavigate()
+
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [joinCodeInput, setJoinCodeInput] = useState('')
 
   if (loading)
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#1E3A5F]">
-        <div className="w-8 h-8 border-3 border-white border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-[#121316]">
+        <div className="w-8 h-8 border-3 border-[#0B57D0] border-t-transparent rounded-full animate-spin" />
       </div>
     )
 
   if (!user) return <Navigate to="/login" replace />
 
+  const handleJoin = (e: React.FormEvent) => {
+    e.preventDefault()
+    const clean = joinCodeInput.trim()
+    if (clean) nav(`/join/${clean}`)
+  }
+
   return (
-    <div
-      className="h-screen w-screen p-2 md:p-4 lg:p-6 flex items-center justify-center bg-cover bg-center overflow-hidden font-sans select-none"
-      style={{
-        backgroundImage: `linear-gradient(rgba(10, 25, 45, 0.4), rgba(10, 25, 45, 0.5)), url('https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=2000&q=80')`
-      }}
-    >
-      {/* Zoom Workplace App Window */}
-      <div className="zoom-window w-full max-w-[1400px] h-full flex flex-col overflow-hidden relative backdrop-blur-md">
-        {/* Window Top Title / Search Bar */}
-        <header className="h-[44px] bg-[var(--sidebar-bg)] border-b border-[var(--sidebar-border)] flex items-center justify-between px-4 shrink-0 select-none">
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-1.5 ml-14">
-              <span className="font-bold text-[var(--zoom-blue)]">zoom</span> Workplace
-            </span>
-            <div className="flex items-center gap-1 text-[var(--text-muted)] ml-2">
-              <button className="p-1 hover:text-[var(--text-primary)] rounded"><ChevronLeft className="w-4 h-4" /></button>
-              <button className="p-1 hover:text-[var(--text-primary)] rounded"><ChevronRight className="w-4 h-4" /></button>
-              <button className="p-1 hover:text-[var(--text-primary)] rounded"><History className="w-3.5 h-3.5" /></button>
-            </div>
+    <div className="min-h-screen w-screen flex flex-col bg-[var(--bg-page)] text-[var(--text-primary)] select-none">
+      {/* ── TOP NAV HEADER (Exact Google Meet Header from Screenshot) ────── */}
+      <header className="h-[64px] px-6 border-b border-[var(--border-color)] flex items-center justify-between shrink-0 bg-[var(--bg-page)]">
+        {/* Brand */}
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-400 via-emerald-400 to-blue-500 flex items-center justify-center shadow-sm">
+            <Video className="w-5 h-5 text-white" />
           </div>
+          <span className="text-xl font-medium tracking-tight text-[var(--text-primary)]">
+            Meet<span className="font-bold text-[#0B57D0] dark:text-[#A8C7FA]">AI</span>
+          </span>
+        </div>
 
-          {/* Central Search Bar */}
-          <div className="flex-1 max-w-[420px] mx-4">
-            <div className="relative">
-              <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input
-                type="text"
-                placeholder="Search"
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="w-full bg-[var(--card-bg)] border border-[var(--sidebar-border)] rounded-md pl-8 pr-3 py-1 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--zoom-blue)]"
-              />
-            </div>
+        {/* Center: Quick Join input & New Meeting pill */}
+        <form onSubmit={handleJoin} className="flex items-center gap-3 max-w-[480px] w-full mx-4">
+          <div className="relative flex-1">
+            <Keyboard className="w-4 h-4 text-[var(--text-muted)] absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Enter a code or link"
+              value={joinCodeInput}
+              onChange={e => setJoinCodeInput(e.target.value)}
+              className="pill-input w-full pl-10 pr-4"
+            />
           </div>
+          <button
+            type="submit"
+            disabled={!joinCodeInput.trim()}
+            className="btn-pill-join"
+          >
+            Join
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreateModal(true)}
+            className="btn-pill-primary"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New</span>
+          </button>
+        </form>
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowCreateModal(true)}
-              className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-md hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <Plus className="w-4 h-4" />
-            </button>
-            <button className="p-1.5 text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-md hover:bg-black/5 dark:hover:bg-white/5">
-              <Bell className="w-4 h-4" />
-            </button>
-            <button className="p-1.5 text-[var(--zoom-blue)] hover:bg-[var(--zoom-blue)]/10 rounded-md">
-              <Sparkles className="w-4 h-4" />
-            </button>
-            {user && (
-              <div className="w-6 h-6 rounded-full bg-[var(--zoom-blue)] text-white text-[10px] font-bold grid place-items-center ml-1">
+        {/* Right side utilities */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={toggle}
+            title="Toggle theme"
+            className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]"
+          >
+            {theme === 'dark' ? <Sun className="w-4 h-4 text-amber-400" /> : <Moon className="w-4 h-4" />}
+          </button>
+          <button className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]">
+            <HelpCircle className="w-5 h-5" />
+          </button>
+          <button className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]">
+            <Settings className="w-5 h-5" />
+          </button>
+          <button className="p-2 rounded-full hover:bg-black/5 dark:hover:bg-white/5 text-[var(--text-secondary)]">
+            <Grid className="w-5 h-5" />
+          </button>
+
+          {/* User Profile Avatar */}
+          {user && (
+            <div className="relative group ml-1">
+              <div className="w-8 h-8 rounded-full bg-[#007A5A] text-white font-medium text-xs grid place-items-center cursor-pointer shadow-sm">
                 {user.name[0].toUpperCase()}
               </div>
-            )}
-          </div>
-        </header>
-
-        {/* Window Body: Sidebar + Main Content */}
-        <div className="flex-1 flex min-h-0 overflow-hidden bg-[var(--window-bg)]">
-          <ZoomSidebar />
-          <main className="flex-1 min-w-0 h-full overflow-hidden">
-            <Outlet context={{ openCreateMeeting: () => setShowCreateModal(true) }} />
-          </main>
+              <button
+                onClick={() => { logout(); nav('/login') }}
+                title="Sign Out"
+                className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <LogOut className="w-2.5 h-2.5" />
+              </button>
+            </div>
+          )}
         </div>
+      </header>
+
+      {/* ── BODY: LEFT VERTICAL TAB BAR + MAIN VIEW ─────────────────────── */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {/* Left Vertical Tab Rail */}
+        <aside className="w-[80px] shrink-0 border-r border-[var(--border-color)] flex flex-col items-center py-6 gap-6 bg-[var(--bg-page)]">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-1.5 w-full py-2 text-xs font-medium transition-colors ${
+                isActive
+                  ? 'text-[#0B57D0] dark:text-[#A8C7FA]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`
+            }
+          >
+            {({ isActive }) => (
+              <>
+                <div
+                  className={`w-12 h-8 rounded-full grid place-items-center transition-colors ${
+                    isActive ? 'bg-[#D3E3FD] dark:bg-[#004A77]' : 'hover:bg-black/5'
+                  }`}
+                >
+                  <Video className="w-4 h-4" />
+                </div>
+                <span>Meetings</span>
+              </>
+            )}
+          </NavLink>
+
+          <NavLink
+            to="/calls"
+            className="flex flex-col items-center gap-1.5 w-full py-2 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          >
+            <div className="w-12 h-8 rounded-full grid place-items-center hover:bg-black/5">
+              <Phone className="w-4 h-4" />
+            </div>
+            <span>Calls</span>
+          </NavLink>
+        </aside>
+
+        {/* Main View Area */}
+        <main className="flex-1 min-w-0 h-full overflow-y-auto p-6 md:p-10 flex flex-col items-center">
+          <div className="w-full max-w-[960px] flex flex-col gap-6">
+            <Outlet context={{ openCreateMeeting: () => setShowCreateModal(true) }} />
+          </div>
+        </main>
       </div>
 
       {showCreateModal && (

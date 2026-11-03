@@ -3,24 +3,18 @@ import { useNavigate, useOutletContext } from 'react-router-dom'
 import { meetingsApi, roomsApi } from '../lib/api'
 import type { Meeting } from '../lib/types'
 import {
-  Video,
+  Shield,
+  ChevronLeft,
+  ChevronRight,
   Plus,
-  Calendar,
-  ScreenShare,
-  FileText,
+  Video,
   Clock,
-  MoreHorizontal,
-  ChevronDown,
   Sparkles,
-  Send,
-  ThumbsUp,
-  ThumbsDown,
-  CornerDownRight,
-  RefreshCw,
-  ExternalLink
+  Calendar as CalendarIcon,
+  Bell,
+  X
 } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import clsx from 'clsx'
 
 interface LayoutContext {
   openCreateMeeting: () => void
@@ -33,40 +27,8 @@ export default function DashboardPage() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentTime, setCurrentTime] = useState(new Date())
-  const [startingVideoId, setStartingVideoId] = useState<number | null>(null)
-
-  // AI Assistant Chat state (Right side of Zoom Workplace)
-  const [aiChatInput, setAiChatInput] = useState('')
-  const [aiChatMessages, setAiChatMessages] = useState<
-    { id: string; sender: 'ai' | 'user'; text: string; thought?: string; time: string }[]
-  >([
-    {
-      id: '1',
-      sender: 'ai',
-      thought: 'Checked user calendar and participant availability...',
-      text: 'John and Daniel are unavailable at this time. Here are three alternative slots when all of you are available: 10-11 AM or 4-5 PM. Would you like to pick one?',
-      time: '9:20 AM'
-    },
-    {
-      id: '2',
-      sender: 'user',
-      text: 'Help me coordinate',
-      time: '9:21 AM'
-    },
-    {
-      id: '3',
-      sender: 'ai',
-      thought: 'Drafting email request to ask participants for preference...',
-      text: "Sure, I'll send them an email to ask if they are available from 2 to 4 PM today. Would you like me to send this email now?",
-      time: '9:22 AM'
-    }
-  ])
-
-  useEffect(() => {
-    const clock = setInterval(() => setCurrentTime(new Date()), 1000)
-    return () => clearInterval(clock)
-  }, [])
+  const [selectedDayOffset, setSelectedDayOffset] = useState(0) // 0 = Tuesday 3 Nov (Today)
+  const [showNotificationCard, setShowNotificationCard] = useState(true)
 
   const loadMeetings = () => {
     setLoading(true)
@@ -85,7 +47,6 @@ export default function DashboardPage() {
   }, [])
 
   const handleStartOrJoinVideo = async (meeting: Meeting) => {
-    setStartingVideoId(meeting.id)
     try {
       if (meeting.status === 'SCHEDULED') {
         await meetingsApi.start(meeting.id)
@@ -104,288 +65,222 @@ export default function DashboardPage() {
       })
     } catch (err: any) {
       console.error(err)
-    } finally {
-      setStartingVideoId(null)
     }
   }
 
-  const handleSendAiPrompt = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!aiChatInput.trim()) return
-
-    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    const userPrompt = aiChatInput.trim()
-    setAiChatMessages(prev => [
-      ...prev,
-      { id: String(Date.now()), sender: 'user', text: userPrompt, time: now }
-    ])
-    setAiChatInput('')
-
-    // Simulate AI Copilot Response
-    setTimeout(() => {
-      setAiChatMessages(prev => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          sender: 'ai',
-          thought: `Processing request: "${userPrompt}" with Gemini meeting intelligence...`,
-          text: `I've analyzed your upcoming schedule. I can automatically filter duplicate questions and generate notes for your next meeting.`,
-          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        }
-      ])
-    }, 800)
-  }
-
-  const formatHoursMins = (date: Date) => {
-    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-  }
-
-  const formatDateString = (date: Date) => {
-    return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
-  }
+  // Days of week strip from screenshot: Mon 2, Tue 3, Wed 4, Thu 5, Fri 6, Sat 7, Sun 8
+  const daysOfWeek = [
+    { label: 'MON', date: 2, offset: -1 },
+    { label: 'TUE', date: 3, offset: 0, isToday: true },
+    { label: 'WED', date: 4, offset: 1 },
+    { label: 'THU', date: 5, offset: 2 },
+    { label: 'FRI', date: 6, offset: 3 },
+    { label: 'SAT', date: 7, offset: 4 },
+    { label: 'SUN', date: 8, offset: 5 },
+  ]
 
   return (
-    <div className="h-full flex overflow-hidden bg-[var(--window-bg)]">
-      {/* ── LEFT / CENTER PANE: ZOOM HOME ─────────────────────────────────── */}
-      <div className="flex-1 flex flex-col min-w-0 h-full overflow-y-auto custom-scroll border-r border-[var(--sidebar-border)]">
-        {/* Upper Big Clock Section */}
-        <div className="pt-8 pb-6 flex flex-col items-center justify-center shrink-0">
-          <h2 className="text-4xl font-normal tracking-tight text-[var(--text-primary)]">
-            {formatHoursMins(currentTime)}
+    <div className="flex flex-col gap-6 w-full relative">
+      {/* ── DATE STRIP (Exact Header: "Tue 3 Nov [calendar]" + Days Bar) ─── */}
+      <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
+        <div className="flex items-center gap-3">
+          <h2 className="text-2xl font-normal text-[var(--text-primary)] flex items-center gap-2">
+            <span>Tue 3 Nov</span>
+            <CalendarIcon className="w-5 h-5 text-[var(--text-muted)] stroke-[1.5]" />
           </h2>
-          <p className="text-xs text-[var(--text-secondary)] mt-1 font-medium">
-            {formatDateString(currentTime)}
-          </p>
         </div>
 
-        {/* 4 Big Zoom Action Buttons (Exact Replica of Image 1) */}
-        <div className="flex items-center justify-center gap-6 pb-8 px-4 shrink-0">
-          {/* 1. New Meeting (Orange) */}
-          <button
-            onClick={openCreateMeeting}
-            className="flex flex-col items-center gap-2 group cursor-pointer"
-          >
-            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-orange)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
-              <Video className="w-8 h-8 fill-current" />
-            </div>
-            <span className="text-xs font-medium text-[var(--text-primary)]">New meeting</span>
+        {/* Days of week selector matching screenshot */}
+        <div className="flex items-center gap-4 text-xs font-medium text-[var(--text-secondary)]">
+          <button className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5">
+            <ChevronLeft className="w-4 h-4" />
           </button>
 
-          {/* 2. Join (Blue) */}
-          <button
-            onClick={() => {
-              const code = prompt('Enter meeting code:')
-              if (code) nav(`/join/${code.trim()}`)
-            }}
-            className="flex flex-col items-center gap-2 group cursor-pointer"
-          >
-            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
-              <Plus className="w-8 h-8 stroke-[2.5]" />
-            </div>
-            <span className="text-xs font-medium text-[var(--text-primary)]">Join</span>
-          </button>
-
-          {/* 3. Schedule (Blue) */}
-          <button
-            onClick={openCreateMeeting}
-            className="flex flex-col items-center gap-2 group cursor-pointer"
-          >
-            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
-              <Calendar className="w-7 h-7" />
-            </div>
-            <span className="text-xs font-medium text-[var(--text-primary)]">Schedule</span>
-          </button>
-
-          {/* 4. Share Screen (Blue) */}
-          <button
-            onClick={() => alert('Screen share will be initiated inside meeting room.')}
-            className="flex flex-col items-center gap-2 group cursor-pointer"
-          >
-            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
-              <ScreenShare className="w-7 h-7" />
-            </div>
-            <span className="text-xs font-medium text-[var(--text-primary)]">Share screen</span>
-          </button>
-
-          {/* 5. My Notes (Blue) */}
-          <button
-            onClick={() => nav('/notes')}
-            className="flex flex-col items-center gap-2 group cursor-pointer"
-          >
-            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
-              <FileText className="w-7 h-7" />
-            </div>
-            <span className="text-xs font-medium text-[var(--text-primary)]">My notes</span>
-          </button>
-        </div>
-
-        {/* Meeting Cards List ("Today" section from Image 1) */}
-        <div className="max-w-[560px] w-full mx-auto px-4 pb-8 flex-1">
-          <div className="flex items-center justify-between py-2 text-xs font-semibold text-[var(--text-primary)]">
-            <span className="flex items-center gap-1 cursor-pointer">
-              Today <ChevronDown className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-            </span>
-            <div className="flex items-center gap-2 text-[var(--text-muted)]">
-              <button onClick={loadMeetings} className="hover:text-[var(--text-primary)] p-1 rounded">
-                <RefreshCw className="w-3 h-3" />
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-3 mt-1">
-            {loading ? (
-              <div className="p-8 text-center text-xs text-[var(--text-muted)]">Loading meetings...</div>
-            ) : meetings.length === 0 ? (
-              <div className="p-8 border border-[var(--card-border)] rounded-xl text-center bg-[var(--card-bg)]">
-                <p className="text-xs text-[var(--text-secondary)]">No meetings scheduled for today</p>
+          <div className="flex items-center gap-2">
+            {daysOfWeek.map(d => {
+              const isSelected = selectedDayOffset === d.offset
+              return (
                 <button
-                  onClick={openCreateMeeting}
-                  className="mt-3 text-xs text-[var(--zoom-blue)] font-semibold hover:underline"
+                  key={d.label}
+                  onClick={() => setSelectedDayOffset(d.offset)}
+                  className={`flex flex-col items-center justify-center w-9 h-11 rounded-full transition-colors ${
+                    isSelected
+                      ? 'bg-[#D3E3FD] dark:bg-[#004A77] text-[#041E49] dark:text-[#C2E7FF] font-bold'
+                      : 'hover:bg-black/5 dark:hover:bg-white/5'
+                  }`}
                 >
-                  + Create a meeting
+                  <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
+                    {d.label}
+                  </span>
+                  <span className="text-xs">{d.date}</span>
                 </button>
-              </div>
-            ) : (
-              meetings.map(m => {
-                const isLive = m.status === 'ACTIVE'
-                return (
-                  <div
-                    key={m.id}
-                    className="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] shadow-xs flex flex-col gap-2 hover:border-[var(--zoom-blue)] transition-colors relative"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
-                          {m.title}
-                          {isLive && (
-                            <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded">
-                              Live Now
-                            </span>
-                          )}
-                        </h4>
-                        <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                          Today, 1:00 - 2:00 PM · Host: {user?.name || 'You'} · 14 invitees
-                        </p>
-                      </div>
-
-                      <button className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1">
-                        <MoreHorizontal className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    {/* Participant Avatars & Join Button */}
-                    <div className="flex items-center justify-between pt-2 mt-1">
-                      <div className="flex items-center gap-2">
-                        <div className="flex -space-x-1.5 overflow-hidden">
-                          <div className="w-5 h-5 rounded-full bg-emerald-500 text-white font-bold text-[8px] grid place-items-center border border-white">
-                            RS
-                          </div>
-                          <div className="w-5 h-5 rounded-full bg-amber-400 text-white font-bold text-[8px] grid place-items-center border border-white">
-                            KM
-                          </div>
-                        </div>
-                        <span className="text-[11px] text-[var(--text-secondary)]">2 joined</span>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={() => nav(`/meetings/${m.id}`)}
-                          className="px-3 py-1 rounded-md text-xs font-medium text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5"
-                        >
-                          Details
-                        </button>
-                        <button
-                          onClick={() => handleStartOrJoinVideo(m)}
-                          disabled={startingVideoId === m.id}
-                          className="px-4 py-1.5 rounded-md text-xs font-semibold text-white bg-[var(--zoom-blue)] hover:bg-[var(--zoom-hover)] shadow-xs transition-colors flex items-center gap-1.5"
-                        >
-                          <Video className="w-3.5 h-3.5" />
-                          <span>{startingVideoId === m.id ? 'Connecting…' : 'Join'}</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })
-            )}
+              )
+            })}
           </div>
+
+          <button className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5">
+            <ChevronRight className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      {/* ── RIGHT PANE: ZOOM AI COMPANION (Exact Replica of Image 1 Right Side) ── */}
-      <div className="w-[380px] shrink-0 h-full flex flex-col bg-[var(--sidebar-bg)] border-l border-[var(--sidebar-border)] select-none">
-        {/* AI Top Bar */}
-        <div className="h-[44px] px-4 border-b border-[var(--sidebar-border)] flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
-            <Sparkles className="w-3.5 h-3.5 text-[var(--zoom-blue)]" />
-            <span>AI Companion</span>
+      {/* ── SECURITY / TRUST BANNER ("Your meeting is safe") ────────────── */}
+      <div className="p-4 rounded-2xl bg-[#EDF3FD] dark:bg-[#1E2738] flex items-center justify-between text-xs text-[#0B57D0] dark:text-[#A8C7FA]">
+        <div className="flex items-center gap-3">
+          <div className="w-7 h-7 rounded-full bg-[#0B57D0] text-white grid place-items-center shrink-0">
+            <Shield className="w-4 h-4" />
           </div>
-          <span className="text-[11px] text-[var(--text-muted)]">MeetAI Intelligence</span>
+          <div>
+            <h4 className="font-semibold text-[var(--text-primary)]">Your meeting is safe</h4>
+            <p className="text-[var(--text-secondary)]">
+              No one can join a meeting unless invited or admitted by the host. Gemini AI actively filters duplicate questions.
+            </p>
+          </div>
         </div>
 
-        {/* AI Conversation Scroll */}
-        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scroll text-xs">
-          {aiChatMessages.map(msg => (
-            <div key={msg.id} className="flex flex-col gap-1">
-              {msg.sender === 'ai' ? (
-                <div className="flex flex-col gap-1.5 bg-white dark:bg-[#1E222B] p-3.5 rounded-xl border border-[var(--sidebar-border)] shadow-xs">
-                  {/* Thought process disclosure tag */}
-                  {msg.thought && (
-                    <div className="text-[10px] text-[var(--zoom-blue)] font-semibold flex items-center justify-between border-b border-[var(--sidebar-border)] pb-1.5 mb-1">
-                      <span className="flex items-center gap-1">
-                        <Sparkles className="w-3 h-3" /> Thought process
-                      </span>
-                      <span className="text-[var(--text-muted)] hover:underline cursor-pointer">
-                        Show details
-                      </span>
-                    </div>
-                  )}
+        <button className="px-3 py-1.5 rounded-full border border-[#0B57D0]/30 hover:bg-[#0B57D0]/10 font-medium">
+          Learn more
+        </button>
+      </div>
 
-                  <p className="text-[var(--text-primary)] leading-relaxed text-xs">
-                    {msg.text}
-                  </p>
-
-                  <div className="flex items-center justify-between pt-2 text-[var(--text-muted)] text-[10px]">
-                    <div className="flex items-center gap-2">
-                      <button className="hover:text-[var(--text-primary)]"><ThumbsUp className="w-3 h-3" /></button>
-                      <button className="hover:text-[var(--text-primary)]"><ThumbsDown className="w-3 h-3" /></button>
-                    </div>
-                    <span>{msg.time}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="self-end max-w-[85%] bg-[var(--zoom-blue)] text-white p-2.5 rounded-xl text-xs leading-relaxed">
-                  {msg.text}
-                  <div className="text-[9px] text-white/70 text-right mt-1">{msg.time}</div>
-                </div>
-              )}
+      {/* ── MEETINGS CONTENT / EMPTY STATE ──────────────────────────────── */}
+      <div className="py-8 flex flex-col items-center justify-center min-h-[380px]">
+        {loading ? (
+          <div className="w-7 h-7 border-2 border-[#0B57D0] border-t-transparent rounded-full animate-spin" />
+        ) : meetings.length === 0 ? (
+          /* Exact Illustration Empty State from Screenshot */
+          <div className="flex flex-col items-center text-center max-w-md">
+            {/* SVG Minimal Illustration (Mug + Pencil + Tablet) */}
+            <div className="w-56 h-36 mb-4 flex items-center justify-center relative">
+              <svg viewBox="0 0 200 120" className="w-full h-full stroke-[#444746] dark:stroke-[#E3E3E3] fill-none" strokeWidth="1.5">
+                {/* Yellow glowing circle */}
+                <circle cx="130" cy="25" r="10" fill="#FEE75C" stroke="#FEE75C" />
+                {/* Coffee mug with gradient yellow */}
+                <path d="M70,85 C70,105 100,105 100,85 L100,60 L70,60 Z" fill="#FFE27A" strokeWidth="1.5" />
+                <path d="M100,66 C108,66 108,80 100,80" strokeWidth="1.5" />
+                {/* Steam curves */}
+                <path d="M80,55 C70,45 90,35 80,25" strokeLinecap="round" />
+                {/* Pink shape */}
+                <path d="M40,70 C40,90 65,90 65,70 Z" fill="#F8B4D9" />
+                {/* Pencil leaning */}
+                <line x1="105" y1="50" x2="115" y2="90" strokeWidth="2" stroke="#444746" />
+                {/* Tablet / Screen with video icon */}
+                <polygon points="120,55 170,55 155,100 105,100" strokeWidth="1.5" fill="none" />
+                <rect x="125" y="70" width="16" height="12" rx="2" />
+                <polygon points="141,74 148,70 148,82 141,78" fill="currentColor" />
+              </svg>
             </div>
-          ))}
-        </div>
 
-        {/* AI Input Composer (Image 1 Bottom) */}
-        <form onSubmit={handleSendAiPrompt} className="p-3 border-t border-[var(--sidebar-border)] bg-[var(--window-bg)]">
-          <div className="relative">
-            <input
-              type="text"
-              placeholder="Write a message or type '/' for more"
-              value={aiChatInput}
-              onChange={e => setAiChatInput(e.target.value)}
-              className="w-full bg-[var(--sidebar-bg)] border border-[var(--sidebar-border)] rounded-lg pl-3 pr-10 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--zoom-blue)]"
-            />
+            <h3 className="text-2xl font-normal text-[var(--text-primary)] mb-2">
+              No meetings scheduled for today
+            </h3>
+            <p className="text-sm text-[var(--text-secondary)] mb-6">
+              Schedule a meeting or enjoy the free time
+            </p>
+
             <button
-              type="submit"
-              disabled={!aiChatInput.trim()}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--zoom-blue)] disabled:text-[var(--text-muted)]"
+              onClick={openCreateMeeting}
+              className="btn-pill-primary px-6 py-2.5 text-sm shadow-xs"
             >
-              <Send className="w-3.5 h-3.5" />
+              <Plus className="w-4 h-4" />
+              <span>New</span>
             </button>
           </div>
-          <p className="text-[9px] text-[var(--text-muted)] text-center mt-2">
-            AI can make mistakes. Review for accuracy.
-          </p>
-        </form>
+        ) : (
+          /* List of Scheduled/Active Meetings in Clean Cards */
+          <div className="w-full flex flex-col gap-3">
+            {meetings.map(m => {
+              const isLive = m.status === 'ACTIVE'
+              return (
+                <div
+                  key={m.id}
+                  className="p-5 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-page)] hover:shadow-sm transition-all flex items-center justify-between"
+                >
+                  <div className="flex items-center gap-4">
+                    <div
+                      className={`w-11 h-11 rounded-2xl grid place-items-center ${
+                        isLive ? 'bg-rose-100 text-rose-600' : 'bg-[#D3E3FD] text-[#0B57D0]'
+                      }`}
+                    >
+                      <Video className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="font-medium text-base text-[var(--text-primary)] flex items-center gap-2">
+                        {m.title}
+                        {isLive && (
+                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                            Live Now
+                          </span>
+                        )}
+                      </h4>
+                      <p className="text-xs text-[var(--text-secondary)] mt-0.5 flex items-center gap-2">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span>Today, 1:00 PM · Host: {user?.name || 'You'}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => nav(`/meetings/${m.id}`)}
+                      className="px-4 py-2 rounded-full text-xs font-medium text-[var(--text-secondary)] hover:bg-black/5"
+                    >
+                      Details
+                    </button>
+                    <button
+                      onClick={() => handleStartOrJoinVideo(m)}
+                      className="btn-pill-primary px-5 py-2 text-xs"
+                    >
+                      <span>Join call</span>
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
+
+      {/* ── NOTIFICATION PROMPT FLYOUT (Exact bottom-right card from Screenshot) ── */}
+      {showNotificationCard && (
+        <div className="fixed bottom-6 right-6 w-[340px] p-5 rounded-2xl bg-[#D3E3FD] dark:bg-[#003354] text-[#001D35] dark:text-[#C2E7FF] shadow-xl border border-[#0B57D0]/20 flex flex-col gap-3 z-30 animate-fade-in">
+          <div className="flex items-start gap-3">
+            <Bell className="w-5 h-5 text-[#0B57D0] shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h5 className="font-semibold text-xs text-[#041E49] dark:text-white leading-snug">
+                Receive desktop notifications from Meet
+              </h5>
+              <p className="text-[11px] text-[#001D35]/80 dark:text-[#C2E7FF]/80 mt-1 leading-relaxed">
+                Allowing notifications lets Meet alert you about incoming calls and updates that occur while you're in another tab
+              </p>
+            </div>
+            <button
+              onClick={() => setShowNotificationCard(false)}
+              className="text-[#001D35]/60 hover:text-[#001D35]"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <button
+              onClick={() => setShowNotificationCard(false)}
+              className="px-3 py-1.5 rounded-full text-xs font-medium text-[#0B57D0] hover:bg-black/5"
+            >
+              Not now
+            </button>
+            <button
+              onClick={() => {
+                alert('Notifications allowed!')
+                setShowNotificationCard(false)
+              }}
+              className="px-4 py-1.5 rounded-full text-xs font-medium bg-[#0B57D0] text-white hover:bg-[#0842A0] shadow-xs"
+            >
+              Allow notifications
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
