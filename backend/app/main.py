@@ -30,6 +30,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "MeetAI API",
+        "docs": "/docs",
+        "health": "/health"
+    }
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 # REST routers
 app.include_router(auth.router,        prefix=settings.API_V1_STR)
 app.include_router(meetings.router,    prefix=settings.API_V1_STR)
@@ -49,15 +65,10 @@ async def websocket_endpoint(websocket: WebSocket, meeting_id: int):
     try:
         while True:
             data = await websocket.receive_text()
+            # Echo or process incoming socket messages
+            await manager.broadcast_to_meeting(meeting_id, {
+                "type": "chat_message",
+                "raw": data
+            })
     except WebSocketDisconnect:
         manager.disconnect(websocket, meeting_id)
-
-
-@app.get("/")
-def root():
-    return {"message": "MeetAI API", "version": "2.0"}
-
-
-@app.get(f"{settings.API_V1_STR}/health")
-def health_check():
-    return {"status": "ok"}

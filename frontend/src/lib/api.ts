@@ -1,6 +1,11 @@
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api' })
+// If VITE_API_BASE_URL is set in environment (e.g. on Vercel), use it; otherwise fallback to '/api' for local dev proxy
+const apiBase = import.meta.env.VITE_API_BASE_URL
+  ? `${import.meta.env.VITE_API_BASE_URL.replace(/\/+$/, '')}/api`
+  : '/api'
+
+const api = axios.create({ baseURL: apiBase })
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
