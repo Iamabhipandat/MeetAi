@@ -22,13 +22,16 @@ export default function App() {
             {/* Live Video Conference Room with AI Q&A Sidebar */}
             <Route path="/room/:code" element={<RoomPage />} />
 
-            {/* Direct Google Meet Interface (No login wall) */}
+            {/* Direct Google Meet Interface */}
             <Route element={<AppLayout />}>
               <Route path="/" element={<DashboardPage />} />
               <Route path="/meetings/:id" element={<MeetingDetailPage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/notes" element={<NotesPage />} />
+              {/* If user visits /login or /register, seamlessly show Home */}
+              <Route path="/login" element={<Navigate to="/" replace />} />
+              <Route path="/register" element={<Navigate to="/" replace />} />
             </Route>
 
             {/* Fallback to home */}

@@ -16,10 +16,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   r => r,
   err => {
-    if (err.response?.status === 401) {
-      localStorage.removeItem('token')
-      window.location.href = '/login'
-    }
+    // In open Google Meet mode, do NOT redirect to /login on 401
     return Promise.reject(err)
   }
 )
