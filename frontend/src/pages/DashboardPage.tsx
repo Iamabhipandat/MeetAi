@@ -1,237 +1,257 @@
 import { useEffect, useState } from 'react'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { meetingsApi, roomsApi } from '../lib/api'
 import type { Meeting } from '../lib/types'
 import {
-  Shield,
-  ChevronLeft,
-  ChevronRight,
-  Plus,
   Video,
-  Clock,
+  Plus,
   Sparkles,
-  Calendar as CalendarIcon,
-  Bell,
-  X
+  ArrowRight,
+  ShieldCheck,
+  Zap,
+  Filter,
+  MessageSquare,
+  Clock,
+  Copy,
+  Check,
+  Play
 } from 'lucide-react'
-import { useAuth } from '../contexts/AuthContext'
-
-interface LayoutContext {
-  openCreateMeeting: () => void
-}
 
 export default function DashboardPage() {
-  const { user } = useAuth()
   const nav = useNavigate()
-  const { openCreateMeeting } = useOutletContext<LayoutContext>()
-
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedDayOffset, setSelectedDayOffset] = useState(0) // 0 = Tuesday 3 Nov (Today)
-  const [showNotificationCard, setShowNotificationCard] = useState(true)
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [newTitle, setNewTitle] = useState('')
+  const [creating, setCreating] = useState(false)
 
   const loadMeetings = () => {
-    setLoading(true)
     meetingsApi
       .list()
       .then(r => setMeetings(r.data))
-      .catch(err => console.error(err))
+      .catch(() => setMeetings([]))
       .finally(() => setLoading(false))
   }
 
   useEffect(() => {
     loadMeetings()
-    const handleCreated = () => loadMeetings()
-    window.addEventListener('meetai:meeting-created', handleCreated)
-    return () => window.removeEventListener('meetai:meeting-created', handleCreated)
   }, [])
 
-  const handleStartOrJoinVideo = async (meeting: Meeting) => {
+  const handleStartInstantMeeting = async () => {
+    setCreating(true)
+    const title = newTitle.trim() || `AI Meeting — ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
     try {
-      if (meeting.status === 'SCHEDULED') {
-        await meetingsApi.start(meeting.id)
-      }
-      const roomRes = await roomsApi.create(meeting.id)
+      const meetingRes = await meetingsApi.create(title)
+      const meetingId = meetingRes.data.id
+      await meetingsApi.start(meetingId)
+      const roomRes = await roomsApi.create(meetingId)
       const joinCode = roomRes.data.join_code
 
-      const tokenRes = await roomsApi.getToken(meeting.id, user?.name || 'Host')
       nav(`/room/${joinCode}`, {
         state: {
-          token: tokenRes.data.token,
-          roomName: tokenRes.data.room_name,
-          meetingId: meeting.id,
-          participantName: user?.name || 'Host',
+          meetingId,
+          roomName: title,
+          participantName: 'Host',
         },
       })
-    } catch (err: any) {
-      console.error(err)
+    } catch {
+      // Fallback: direct instant room code
+      const instantCode = 'meet-' + Math.random().toString(36).substring(2, 8)
+      nav(`/room/${instantCode}`, {
+        state: {
+          meetingId: 1,
+          roomName: title,
+          participantName: 'Host',
+        },
+      })
+    } finally {
+      setCreating(false)
     }
   }
 
-  // Days of week strip from screenshot: Mon 2, Tue 3, Wed 4, Thu 5, Fri 6, Sat 7, Sun 8
-  const daysOfWeek = [
-    { label: 'MON', date: 2, offset: -1 },
-    { label: 'TUE', date: 3, offset: 0, isToday: true },
-    { label: 'WED', date: 4, offset: 1 },
-    { label: 'THU', date: 5, offset: 2 },
-    { label: 'FRI', date: 6, offset: 3 },
-    { label: 'SAT', date: 7, offset: 4 },
-    { label: 'SUN', date: 8, offset: 5 },
-  ]
+  const copyLink = (e: React.MouseEvent, id: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    roomsApi.create(id).then(r => {
+      navigator.clipboard.writeText(`${window.location.origin}/join/${r.data.join_code}`)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    }).catch(() => {
+      navigator.clipboard.writeText(`${window.location.origin}/join/room-${id}`)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId(null), 2000)
+    })
+  }
 
   return (
-    <div className="flex flex-col gap-6 w-full relative">
-      {/* ── DATE STRIP (Exact Header: "Tue 3 Nov [calendar]" + Days Bar) ─── */}
-      <div className="flex items-center justify-between pb-2 border-b border-[var(--border-color)]">
-        <div className="flex items-center gap-3">
-          <h2 className="text-2xl font-normal text-[var(--text-primary)] flex items-center gap-2">
-            <span>Tue 3 Nov</span>
-            <CalendarIcon className="w-5 h-5 text-[var(--text-muted)] stroke-[1.5]" />
-          </h2>
+    <div className="flex flex-col gap-10">
+      {/* ── HERO SECTION ───────────────────────────────────────────────── */}
+      <section className="flex flex-col items-center text-center pt-4 md:pt-8 max-w-[800px] mx-auto">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-xs font-semibold mb-6 shadow-sm">
+          <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+          <span>Gemini-Powered Real-Time Duplicate Question Filtering</span>
         </div>
 
-        {/* Days of week selector matching screenshot */}
-        <div className="flex items-center gap-4 text-xs font-medium text-[var(--text-secondary)]">
-          <button className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5">
-            <ChevronLeft className="w-4 h-4" />
-          </button>
+        <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight text-white leading-[1.15]">
+          Supercharge your video meetings with{' '}
+          <span className="bg-gradient-to-r from-indigo-400 via-sky-300 to-cyan-400 bg-clip-text text-transparent">
+            Live AI
+          </span>
+        </h1>
 
-          <div className="flex items-center gap-2">
-            {daysOfWeek.map(d => {
-              const isSelected = selectedDayOffset === d.offset
-              return (
-                <button
-                  key={d.label}
-                  onClick={() => setSelectedDayOffset(d.offset)}
-                  className={`flex flex-col items-center justify-center w-9 h-11 rounded-full transition-colors ${
-                    isSelected
-                      ? 'bg-[#D3E3FD] dark:bg-[#004A77] text-[#041E49] dark:text-[#C2E7FF] font-bold'
-                      : 'hover:bg-black/5 dark:hover:bg-white/5'
-                  }`}
-                >
-                  <span className="text-[10px] text-[var(--text-muted)] uppercase tracking-wider">
-                    {d.label}
-                  </span>
-                  <span className="text-xs">{d.date}</span>
-                </button>
-              )
-            })}
-          </div>
+        <p className="text-slate-400 text-base md:text-lg max-w-[620px] mt-4 leading-relaxed font-normal">
+          Crystal clear WebRTC video calls with automatic speech transcription, instant duplicate Q&A detection, and one-click meeting summaries.
+        </p>
 
-          <button className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/5">
-            <ChevronRight className="w-4 h-4" />
+        {/* Instant Meeting Action Bar */}
+        <div className="mt-8 flex flex-col sm:flex-row items-center gap-3 w-full max-w-[500px]">
+          <input
+            type="text"
+            placeholder="Name your meeting (optional)..."
+            value={newTitle}
+            onChange={e => setNewTitle(e.target.value)}
+            className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm text-white placeholder-slate-500 outline-none focus:border-indigo-500 focus:bg-white/10 transition-all"
+          />
+          <button
+            onClick={handleStartInstantMeeting}
+            disabled={creating}
+            className="btn-gradient py-3 px-6 rounded-2xl w-full sm:w-auto shrink-0 text-sm font-bold justify-center"
+          >
+            <Video className="w-4 h-4" />
+            <span>{creating ? 'Starting…' : 'Start Instant Call'}</span>
           </button>
         </div>
-      </div>
+      </section>
 
-      {/* ── SECURITY / TRUST BANNER ("Your meeting is safe") ────────────── */}
-      <div className="p-4 rounded-2xl bg-[#EDF3FD] dark:bg-[#1E2738] flex items-center justify-between text-xs text-[#0B57D0] dark:text-[#A8C7FA]">
-        <div className="flex items-center gap-3">
-          <div className="w-7 h-7 rounded-full bg-[#0B57D0] text-white grid place-items-center shrink-0">
-            <Shield className="w-4 h-4" />
-          </div>
+      {/* ── 3 PILLARS BENTO CARDS ──────────────────────────────────────── */}
+      <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="glass-card-interactive p-6 flex flex-col justify-between">
           <div>
-            <h4 className="font-semibold text-[var(--text-primary)]">Your meeting is safe</h4>
-            <p className="text-[var(--text-secondary)]">
-              No one can join a meeting unless invited or admitted by the host. Gemini AI actively filters duplicate questions.
+            <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 grid place-items-center mb-4 text-cyan-400">
+              <Filter className="w-5 h-5" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-1.5">Duplicate Q&A Filter</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Never answer the same question twice. AI calculates semantic cosine similarity and badges repeated questions automatically.
             </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-white/5 flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+              ✦ Unique
+            </span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+              ≈ Duplicate 91%
+            </span>
           </div>
         </div>
 
-        <button className="px-3 py-1.5 rounded-full border border-[#0B57D0]/30 hover:bg-[#0B57D0]/10 font-medium">
-          Learn more
-        </button>
-      </div>
-
-      {/* ── MEETINGS CONTENT / EMPTY STATE ──────────────────────────────── */}
-      <div className="py-8 flex flex-col items-center justify-center min-h-[380px]">
-        {loading ? (
-          <div className="w-7 h-7 border-2 border-[#0B57D0] border-t-transparent rounded-full animate-spin" />
-        ) : meetings.length === 0 ? (
-          /* Exact Illustration Empty State from Screenshot */
-          <div className="flex flex-col items-center text-center max-w-md">
-            {/* SVG Minimal Illustration (Mug + Pencil + Tablet) */}
-            <div className="w-56 h-36 mb-4 flex items-center justify-center relative">
-              <svg viewBox="0 0 200 120" className="w-full h-full stroke-[#444746] dark:stroke-[#E3E3E3] fill-none" strokeWidth="1.5">
-                {/* Yellow glowing circle */}
-                <circle cx="130" cy="25" r="10" fill="#FEE75C" stroke="#FEE75C" />
-                {/* Coffee mug with gradient yellow */}
-                <path d="M70,85 C70,105 100,105 100,85 L100,60 L70,60 Z" fill="#FFE27A" strokeWidth="1.5" />
-                <path d="M100,66 C108,66 108,80 100,80" strokeWidth="1.5" />
-                {/* Steam curves */}
-                <path d="M80,55 C70,45 90,35 80,25" strokeLinecap="round" />
-                {/* Pink shape */}
-                <path d="M40,70 C40,90 65,90 65,70 Z" fill="#F8B4D9" />
-                {/* Pencil leaning */}
-                <line x1="105" y1="50" x2="115" y2="90" strokeWidth="2" stroke="#444746" />
-                {/* Tablet / Screen with video icon */}
-                <polygon points="120,55 170,55 155,100 105,100" strokeWidth="1.5" fill="none" />
-                <rect x="125" y="70" width="16" height="12" rx="2" />
-                <polygon points="141,74 148,70 148,82 141,78" fill="currentColor" />
-              </svg>
+        <div className="glass-card-interactive p-6 flex flex-col justify-between">
+          <div>
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/10 border border-indigo-500/20 grid place-items-center mb-4 text-indigo-400">
+              <Zap className="w-5 h-5" />
             </div>
-
-            <h3 className="text-2xl font-normal text-[var(--text-primary)] mb-2">
-              No meetings scheduled for today
-            </h3>
-            <p className="text-sm text-[var(--text-secondary)] mb-6">
-              Schedule a meeting or enjoy the free time
+            <h3 className="text-lg font-bold text-white mb-1.5">No Login Barrier</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Just share a short link or meeting code. Any guest can jump straight into the room with zero account creation required.
             </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-white/5 text-xs text-indigo-400 font-semibold flex items-center gap-1">
+            <span>Instant guest access enabled</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </div>
+        </div>
 
+        <div className="glass-card-interactive p-6 flex flex-col justify-between">
+          <div>
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 grid place-items-center mb-4 text-purple-400">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <h3 className="text-lg font-bold text-white mb-1.5">Executive Summaries</h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              One-click structured meeting notes, decisions made, action items, and unanswered questions ready to export.
+            </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-white/5 text-xs text-purple-300 font-semibold flex items-center gap-1">
+            <span>Powered by Google Gemini</span>
+            <Sparkles className="w-3.5 h-3.5" />
+          </div>
+        </div>
+      </section>
+
+      {/* ── ACTIVE / SCHEDULED SESSIONS ─────────────────────────────────── */}
+      <section className="glass-panel p-6 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+            <h2 className="text-lg font-bold text-white">Active & Recent Sessions</h2>
+          </div>
+          <span className="text-xs text-slate-500 font-mono">
+            {meetings.length} recorded session{meetings.length === 1 ? '' : 's'}
+          </span>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-xs text-slate-500">Loading sessions...</div>
+        ) : meetings.length === 0 ? (
+          <div className="p-8 border border-white/5 rounded-2xl text-center bg-white/[0.02]">
+            <p className="text-sm font-semibold text-white mb-1">No past sessions yet</p>
+            <p className="text-xs text-slate-400 mb-4">
+              Click "Start Instant Call" above to launch your first AI conference room.
+            </p>
             <button
-              onClick={openCreateMeeting}
-              className="btn-pill-primary px-6 py-2.5 text-sm shadow-xs"
+              onClick={handleStartInstantMeeting}
+              className="btn-gradient py-2 px-4 text-xs font-bold mx-auto"
             >
-              <Plus className="w-4 h-4" />
-              <span>New</span>
+              <Plus className="w-3.5 h-3.5" />
+              <span>Launch Room</span>
             </button>
           </div>
         ) : (
-          /* List of Scheduled/Active Meetings in Clean Cards */
-          <div className="w-full flex flex-col gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {meetings.map(m => {
               const isLive = m.status === 'ACTIVE'
               return (
                 <div
                   key={m.id}
-                  className="p-5 rounded-2xl border border-[var(--border-color)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-page)] hover:shadow-sm transition-all flex items-center justify-between"
+                  onClick={() => nav(`/meetings/${m.id}`)}
+                  className="p-4 rounded-2xl bg-white/[0.03] hover:bg-white/[0.06] border border-white/5 hover:border-indigo-500/40 transition-all cursor-pointer flex items-center justify-between gap-4"
                 >
-                  <div className="flex items-center gap-4">
-                    <div
-                      className={`w-11 h-11 rounded-2xl grid place-items-center ${
-                        isLive ? 'bg-rose-100 text-rose-600' : 'bg-[#D3E3FD] text-[#0B57D0]'
-                      }`}
-                    >
-                      <Video className="w-5 h-5" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h4 className="text-sm font-bold text-white truncate">{m.title}</h4>
+                      {isLive && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 uppercase tracking-wider">
+                          Live
+                        </span>
+                      )}
                     </div>
-                    <div>
-                      <h4 className="font-medium text-base text-[var(--text-primary)] flex items-center gap-2">
-                        {m.title}
-                        {isLive && (
-                          <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full uppercase tracking-wider">
-                            Live Now
-                          </span>
-                        )}
-                      </h4>
-                      <p className="text-xs text-[var(--text-secondary)] mt-0.5 flex items-center gap-2">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span>Today, 1:00 PM · Host: {user?.name || 'You'}</span>
-                      </p>
-                    </div>
+                    <span className="text-xs text-slate-400 flex items-center gap-1.5 font-mono">
+                      <Clock className="w-3 h-3 text-slate-500" />
+                      ID #{m.id} · {m.status}
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => nav(`/meetings/${m.id}`)}
-                      className="px-4 py-2 rounded-full text-xs font-medium text-[var(--text-secondary)] hover:bg-black/5"
+                      onClick={e => copyLink(e, m.id)}
+                      className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                      title="Copy join link"
                     >
-                      Details
+                      {copiedId === m.id ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
                     </button>
                     <button
-                      onClick={() => handleStartOrJoinVideo(m)}
-                      className="btn-pill-primary px-5 py-2 text-xs"
+                      onClick={e => {
+                        e.stopPropagation()
+                        roomsApi.create(m.id).then(r => nav(`/room/${r.data.join_code}`))
+                      }}
+                      className="btn-gradient text-xs py-1.5 px-3"
                     >
-                      <span>Join call</span>
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>Join</span>
                     </button>
                   </div>
                 </div>
@@ -239,48 +259,7 @@ export default function DashboardPage() {
             })}
           </div>
         )}
-      </div>
-
-      {/* ── NOTIFICATION PROMPT FLYOUT (Exact bottom-right card from Screenshot) ── */}
-      {showNotificationCard && (
-        <div className="fixed bottom-6 right-6 w-[340px] p-5 rounded-2xl bg-[#D3E3FD] dark:bg-[#003354] text-[#001D35] dark:text-[#C2E7FF] shadow-xl border border-[#0B57D0]/20 flex flex-col gap-3 z-30 animate-fade-in">
-          <div className="flex items-start gap-3">
-            <Bell className="w-5 h-5 text-[#0B57D0] shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <h5 className="font-semibold text-xs text-[#041E49] dark:text-white leading-snug">
-                Receive desktop notifications from Meet
-              </h5>
-              <p className="text-[11px] text-[#001D35]/80 dark:text-[#C2E7FF]/80 mt-1 leading-relaxed">
-                Allowing notifications lets Meet alert you about incoming calls and updates that occur while you're in another tab
-              </p>
-            </div>
-            <button
-              onClick={() => setShowNotificationCard(false)}
-              className="text-[#001D35]/60 hover:text-[#001D35]"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <button
-              onClick={() => setShowNotificationCard(false)}
-              className="px-3 py-1.5 rounded-full text-xs font-medium text-[#0B57D0] hover:bg-black/5"
-            >
-              Not now
-            </button>
-            <button
-              onClick={() => {
-                alert('Notifications allowed!')
-                setShowNotificationCard(false)
-              }}
-              className="px-4 py-1.5 rounded-full text-xs font-medium bg-[#0B57D0] text-white hover:bg-[#0842A0] shadow-xs"
-            >
-              Allow notifications
-            </button>
-          </div>
-        </div>
-      )}
+      </section>
     </div>
   )
 }
