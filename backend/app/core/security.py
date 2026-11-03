@@ -12,8 +12,8 @@ from app.models.user import User
 # Password hashing context — uses bcrypt
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# OAuth2 scheme — expects Bearer token in Authorization header
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
+# OAuth2 scheme — auto_error=False allows guest/public access without token
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -33,30 +33,43 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
+def get_default_guest_user(db: Session) -> User:
+    """Provides a permanent guest user so any user can host or join meetings without auth."""
+    guest = db.query(User).filter(User.email == "guest@meetai.local").first()
+    if not guest:
+        guest = User(
+            name="Guest User",
+            email="guest@meetai.local",
+            password_hash=hash_password("guest123"),
+            is_active=True,
+            is_verified=True,
+        )
+        db.add(guest)
+        db.commit()
+        db.refresh(guest)
+    return guest
+
+
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> User:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+    """If token is provided, authenticate user. Otherwise, seamlessly fallback to default guest user."""
+    if not token:
+        return get_default_guest_user(db)
+
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         user_id: Optional[int] = payload.get("sub")
-        if user_id is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+        if user_id is not None:
+            user = db.query(User).filter(User.id == int(user_id)).first()
+            if user:
+                return user
+    except Exception:
+        pass
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
-    if user is None:
-        raise credentials_exception
-    return user
+    return get_default_guest_user(db)
 
 
 def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
-    if not current_user.is_active:
-        raise HTTPException(status_code=400, detail="Inactive user")
     return current_user

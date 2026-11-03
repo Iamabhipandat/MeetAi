@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Navigate, Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
 import CreateMeetingModal from './CreateMeetingModal'
@@ -11,27 +11,17 @@ import {
   Grid,
   Sun,
   Moon,
-  LogOut,
   Keyboard,
   Plus
 } from 'lucide-react'
 
 export default function AppLayout() {
-  const { user, loading, logout } = useAuth()
+  const { user } = useAuth()
   const { theme, toggle } = useTheme()
   const nav = useNavigate()
 
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [joinCodeInput, setJoinCodeInput] = useState('')
-
-  if (loading)
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-[#121316]">
-        <div className="w-8 h-8 border-3 border-[#0B57D0] border-t-transparent rounded-full animate-spin" />
-      </div>
-    )
-
-  if (!user) return <Navigate to="/login" replace />
 
   const handleJoin = (e: React.FormEvent) => {
     e.preventDefault()
@@ -41,10 +31,10 @@ export default function AppLayout() {
 
   return (
     <div className="min-h-screen w-screen flex flex-col bg-[var(--bg-page)] text-[var(--text-primary)] select-none">
-      {/* ── TOP NAV HEADER (Exact Google Meet Header from Screenshot) ────── */}
+      {/* ── TOP NAV HEADER (Google Meet Style) ─────────────────────────── */}
       <header className="h-[64px] px-6 border-b border-[var(--border-color)] flex items-center justify-between shrink-0 bg-[var(--bg-page)]">
         {/* Brand */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 cursor-pointer" onClick={() => nav('/')}>
           <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-400 via-emerald-400 to-blue-500 flex items-center justify-center shadow-sm">
             <Video className="w-5 h-5 text-white" />
           </div>
@@ -102,20 +92,9 @@ export default function AppLayout() {
           </button>
 
           {/* User Profile Avatar */}
-          {user && (
-            <div className="relative group ml-1">
-              <div className="w-8 h-8 rounded-full bg-[#007A5A] text-white font-medium text-xs grid place-items-center cursor-pointer shadow-sm">
-                {user.name[0].toUpperCase()}
-              </div>
-              <button
-                onClick={() => { logout(); nav('/login') }}
-                title="Sign Out"
-                className="absolute -top-1 -right-1 bg-rose-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <LogOut className="w-2.5 h-2.5" />
-              </button>
-            </div>
-          )}
+          <div className="w-8 h-8 rounded-full bg-[#007A5A] text-white font-medium text-xs grid place-items-center shadow-sm ml-1">
+            {user?.name ? user.name[0].toUpperCase() : 'G'}
+          </div>
         </div>
       </header>
 
@@ -149,13 +128,27 @@ export default function AppLayout() {
           </NavLink>
 
           <NavLink
-            to="/calls"
-            className="flex flex-col items-center gap-1.5 w-full py-2 text-xs font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            to="/notes"
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-1.5 w-full py-2 text-xs font-medium transition-colors ${
+                isActive
+                  ? 'text-[#0B57D0] dark:text-[#A8C7FA]'
+                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+              }`
+            }
           >
-            <div className="w-12 h-8 rounded-full grid place-items-center hover:bg-black/5">
-              <Phone className="w-4 h-4" />
-            </div>
-            <span>Calls</span>
+            {({ isActive }) => (
+              <>
+                <div
+                  className={`w-12 h-8 rounded-full grid place-items-center transition-colors ${
+                    isActive ? 'bg-[#D3E3FD] dark:bg-[#004A77]' : 'hover:bg-black/5'
+                  }`}
+                >
+                  <Phone className="w-4 h-4" />
+                </div>
+                <span>Notes & AI</span>
+              </>
+            )}
           </NavLink>
         </aside>
 

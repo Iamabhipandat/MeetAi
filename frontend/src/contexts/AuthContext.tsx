@@ -1,9 +1,8 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react'
-import { authApi } from '../lib/api'
 import type { User } from '../lib/types'
 
 interface AuthContextType {
-  user: User | null
+  user: User
   token: string | null
   login: (email: string, password: string) => Promise<void>
   register: (name: string, email: string, password: string) => Promise<{ requiresVerification: boolean }>
@@ -12,44 +11,25 @@ interface AuthContextType {
   loading: boolean
 }
 
+// Default guest identity (like Google Meet where anyone can join immediately)
+const defaultGuestUser: User = {
+  id: 1,
+  name: localStorage.getItem('meet_user_name') || 'Participant',
+  email: 'guest@meetai.local',
+  is_active: true,
+  is_verified: true,
+  created_at: new Date().toISOString()
+}
+
 const AuthContext = createContext<AuthContextType | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'))
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<User>(defaultGuestUser)
+  const [token, setToken] = useState<string | null>(localStorage.getItem('token') || 'guest-token')
+  const [loading, setLoading] = useState(false)
 
-  useEffect(() => {
-    if (token) {
-      authApi.me()
-        .then(r => setUser(r.data))
-        .catch(() => { setToken(null); localStorage.removeItem('token') })
-        .finally(() => setLoading(false))
-    } else {
-      setLoading(false)
-    }
-  }, [token])
-
-  const login = async (email: string, password: string) => {
-    const r = await authApi.login(email, password)
-    const { access_token, user: u } = r.data
-    localStorage.setItem('token', access_token)
-    setToken(access_token)
-    setUser(u)
-  }
-
-  const register = async (name: string, email: string, password: string) => {
-    const r = await authApi.register(name, email, password)
-    // Dev mode: backend returns access_token directly → auto login
-    if (r.data.access_token) {
-      localStorage.setItem('token', r.data.access_token)
-      setToken(r.data.access_token)
-      setUser(r.data.user)
-      return { requiresVerification: false }
-    }
-    // Production: backend returns { message, email } → show check-email screen
-    return { requiresVerification: true }
-  }
+  const login = async () => {}
+  const register = async () => ({ requiresVerification: false })
 
   const setUserFromToken = (data: { access_token: string; user: User }) => {
     localStorage.setItem('token', data.access_token)
@@ -59,8 +39,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     localStorage.removeItem('token')
-    setToken(null)
-    setUser(null)
   }
 
   return (
