@@ -55,8 +55,11 @@ export default function DashboardPage() {
         },
       })
     } catch {
-      // Fallback: direct instant room code
-      const instantCode = 'meet-' + Math.random().toString(36).substring(2, 8)
+      // Fallback: direct instant Google Meet style code (e.g. zbp-pnjs-tsv)
+      const p1 = Math.random().toString(36).substring(2, 5)
+      const p2 = Math.random().toString(36).substring(2, 6)
+      const p3 = Math.random().toString(36).substring(2, 5)
+      const instantCode = `${p1}-${p2}-${p3}`
       nav(`/room/${instantCode}`, {
         state: {
           meetingId: 1,

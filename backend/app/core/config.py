@@ -1,3 +1,4 @@
+import os
 from pydantic_settings import BaseSettings
 from typing import Optional
 
@@ -45,7 +46,11 @@ class Settings(BaseSettings):
         if self.DATABASE_URL:
             if self.DATABASE_URL.startswith("postgresql://"):
                 return self.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
+            if os.environ.get("VERCEL") and self.DATABASE_URL.startswith("sqlite"):
+                return "sqlite:////tmp/meetai.db"
             return self.DATABASE_URL
+        if os.environ.get("VERCEL"):
+            return "sqlite:////tmp/meetai.db"
         return "sqlite:///./meetai.db"
 
     class Config:
