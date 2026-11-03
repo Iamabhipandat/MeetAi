@@ -37,13 +37,11 @@ class Settings(BaseSettings):
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
-        # If explicit postgres user & server configured, use postgresql+psycopg2
         if self.POSTGRES_USER and self.POSTGRES_SERVER and self.POSTGRES_DB:
             return (
                 f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
                 f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
-        # Handle postgresql:// scheme to ensure psycopg2 dialect is used if given in DATABASE_URL
         if self.DATABASE_URL:
             if self.DATABASE_URL.startswith("postgresql://"):
                 return self.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
@@ -53,3 +51,6 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+
+
+settings = Settings()
