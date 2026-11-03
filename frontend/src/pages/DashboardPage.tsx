@@ -1,32 +1,30 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
-import { meetingsApi, roomsApi, summaryApi } from '../lib/api'
-import type { Meeting, MeetingSummary } from '../lib/types'
+import { meetingsApi, roomsApi } from '../lib/api'
+import type { Meeting } from '../lib/types'
 import {
-  Plus,
   Video,
-  FileText,
-  Copy,
-  Check,
+  Plus,
   Calendar,
+  ScreenShare,
+  FileText,
   Clock,
+  MoreHorizontal,
+  ChevronDown,
   Sparkles,
-  ArrowRight,
-  ChevronRight,
-  Users,
-  Search,
-  Hash
+  Send,
+  ThumbsUp,
+  ThumbsDown,
+  CornerDownRight,
+  RefreshCw,
+  ExternalLink
 } from 'lucide-react'
-import SummaryModal from '../components/SummaryModal'
 import { useAuth } from '../contexts/AuthContext'
-import { formatDate } from '../lib/utils'
 import clsx from 'clsx'
 
 interface LayoutContext {
   openCreateMeeting: () => void
 }
-
-type TabFilter = 'all' | 'ACTIVE' | 'SCHEDULED' | 'ENDED'
 
 export default function DashboardPage() {
   const { user } = useAuth()
@@ -35,13 +33,40 @@ export default function DashboardPage() {
 
   const [meetings, setMeetings] = useState<Meeting[]>([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<TabFilter>('all')
-  const [joinCodeInput, setJoinCodeInput] = useState('')
-  const [joinCodeError, setJoinCodeError] = useState('')
-  const [summary, setSummary] = useState<MeetingSummary | null>(null)
-  const [summaryLoading, setSummaryLoading] = useState<number | null>(null)
-  const [copiedId, setCopiedId] = useState<number | null>(null)
+  const [currentTime, setCurrentTime] = useState(new Date())
   const [startingVideoId, setStartingVideoId] = useState<number | null>(null)
+
+  // AI Assistant Chat state (Right side of Zoom Workplace)
+  const [aiChatInput, setAiChatInput] = useState('')
+  const [aiChatMessages, setAiChatMessages] = useState<
+    { id: string; sender: 'ai' | 'user'; text: string; thought?: string; time: string }[]
+  >([
+    {
+      id: '1',
+      sender: 'ai',
+      thought: 'Checked user calendar and participant availability...',
+      text: 'John and Daniel are unavailable at this time. Here are three alternative slots when all of you are available: 10-11 AM or 4-5 PM. Would you like to pick one?',
+      time: '9:20 AM'
+    },
+    {
+      id: '2',
+      sender: 'user',
+      text: 'Help me coordinate',
+      time: '9:21 AM'
+    },
+    {
+      id: '3',
+      sender: 'ai',
+      thought: 'Drafting email request to ask participants for preference...',
+      text: "Sure, I'll send them an email to ask if they are available from 2 to 4 PM today. Would you like me to send this email now?",
+      time: '9:22 AM'
+    }
+  ])
+
+  useEffect(() => {
+    const clock = setInterval(() => setCurrentTime(new Date()), 1000)
+    return () => clearInterval(clock)
+  }, [])
 
   const loadMeetings = () => {
     setLoading(true)
@@ -54,24 +79,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadMeetings()
-
     const handleCreated = () => loadMeetings()
     window.addEventListener('meetai:meeting-created', handleCreated)
     return () => window.removeEventListener('meetai:meeting-created', handleCreated)
   }, [])
 
-  const greeting = () => {
-    const h = new Date().getHours()
-    if (h < 12) return 'Good morning'
-    if (h < 18) return 'Good afternoon'
-    return 'Good evening'
-  }
-
-  const handleStartOrJoinVideo = async (e: React.MouseEvent, meeting: Meeting) => {
-    e.preventDefault()
-    e.stopPropagation()
+  const handleStartOrJoinVideo = async (meeting: Meeting) => {
     setStartingVideoId(meeting.id)
-
     try {
       if (meeting.status === 'SCHEDULED') {
         await meetingsApi.start(meeting.id)
@@ -95,355 +109,283 @@ export default function DashboardPage() {
     }
   }
 
-  const handleJoinByCode = async (e: React.FormEvent) => {
+  const handleSendAiPrompt = (e: React.FormEvent) => {
     e.preventDefault()
-    setJoinCodeError('')
-    const clean = joinCodeInput.trim()
-    if (!clean) return
+    if (!aiChatInput.trim()) return
 
-    try {
-      const res = await roomsApi.getByCode(clean)
-      nav(`/join/${clean}`)
-    } catch (err: any) {
-      setJoinCodeError('Invalid or expired meeting code')
-    }
+    const now = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const userPrompt = aiChatInput.trim()
+    setAiChatMessages(prev => [
+      ...prev,
+      { id: String(Date.now()), sender: 'user', text: userPrompt, time: now }
+    ])
+    setAiChatInput('')
+
+    // Simulate AI Copilot Response
+    setTimeout(() => {
+      setAiChatMessages(prev => [
+        ...prev,
+        {
+          id: String(Date.now() + 1),
+          sender: 'ai',
+          thought: `Processing request: "${userPrompt}" with Gemini meeting intelligence...`,
+          text: `I've analyzed your upcoming schedule. I can automatically filter duplicate questions and generate notes for your next meeting.`,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ])
+    }, 800)
   }
 
-  const handleSummarize = async (e: React.MouseEvent, id: number) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setSummaryLoading(id)
-    try {
-      const r = await summaryApi.get(id)
-      setSummary(r.data)
-    } finally {
-      setSummaryLoading(null)
-    }
+  const formatHoursMins = (date: Date) => {
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   }
 
-  const copyMeetingLink = (e: React.MouseEvent, m: Meeting) => {
-    e.preventDefault()
-    e.stopPropagation()
-    roomsApi.create(m.id).then(r => {
-      const code = r.data.join_code
-      navigator.clipboard.writeText(`${window.location.origin}/join/${code}`)
-      setCopiedId(m.id)
-      setTimeout(() => setCopiedId(null), 2000)
-    })
+  const formatDateString = (date: Date) => {
+    return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' })
   }
-
-  // Filtered lists
-  const activeMeetings = meetings.filter(m => m.status === 'ACTIVE')
-  const scheduledMeetings = meetings.filter(m => m.status === 'SCHEDULED')
-  const endedMeetings = meetings.filter(m => m.status === 'ENDED')
-
-  const displayedMeetings = meetings.filter(m => {
-    if (tab === 'all') return true
-    return m.status === tab
-  })
 
   return (
-    <div className="flex flex-col gap-6">
-      {/* Header bar matching mockup */}
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-2">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold tracking-tight text-app-text">
-            {greeting()}{user ? `, ${user.name.split(' ')[0]}` : ''}
-          </h1>
-          <p className="text-app-mut text-sm mt-1">
-            {activeMeetings.length > 0 ? (
-              <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                {activeMeetings.length} live meeting{activeMeetings.length > 1 ? 's' : ''} in progress
-              </span>
-            ) : (
-              <span>You have {scheduledMeetings.length} upcoming meetings scheduled.</span>
-            )}
+    <div className="h-full flex overflow-hidden bg-[var(--window-bg)]">
+      {/* ── LEFT / CENTER PANE: ZOOM HOME ─────────────────────────────────── */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-y-auto custom-scroll border-r border-[var(--sidebar-border)]">
+        {/* Upper Big Clock Section */}
+        <div className="pt-8 pb-6 flex flex-col items-center justify-center shrink-0">
+          <h2 className="text-4xl font-normal tracking-tight text-[var(--text-primary)]">
+            {formatHoursMins(currentTime)}
+          </h2>
+          <p className="text-xs text-[var(--text-secondary)] mt-1 font-medium">
+            {formatDateString(currentTime)}
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        {/* 4 Big Zoom Action Buttons (Exact Replica of Image 1) */}
+        <div className="flex items-center justify-center gap-6 pb-8 px-4 shrink-0">
+          {/* 1. New Meeting (Orange) */}
           <button
             onClick={openCreateMeeting}
-            className="btn btn-ghost"
+            className="flex flex-col items-center gap-2 group cursor-pointer"
           >
-            <Calendar className="w-4 h-4 text-app-mut" />
-            <span>Schedule</span>
-          </button>
-          <button
-            onClick={openCreateMeeting}
-            className="btn shadow-lg shadow-blue-600/25"
-          >
-            <Video className="w-4 h-4" />
-            <span>New Meeting</span>
-          </button>
-        </div>
-      </header>
-
-      {/* Tabs */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="inline-flex p-1 bg-app-card border border-app-line rounded-2xl gap-1">
-          <button
-            onClick={() => setTab('all')}
-            className={clsx(
-              'px-4 py-2 rounded-xl text-xs md:text-sm font-medium transition-all',
-              tab === 'all'
-                ? 'bg-app-card2 text-app-text shadow-sm'
-                : 'text-app-mut hover:text-app-text'
-            )}
-          >
-            All ({meetings.length})
-          </button>
-          <button
-            onClick={() => setTab('ACTIVE')}
-            className={clsx(
-              'px-4 py-2 rounded-xl text-xs md:text-sm font-medium transition-all flex items-center gap-1.5',
-              tab === 'ACTIVE'
-                ? 'bg-app-card2 text-app-text shadow-sm'
-                : 'text-app-mut hover:text-app-text'
-            )}
-          >
-            {activeMeetings.length > 0 && <span className="w-2 h-2 rounded-full bg-[var(--green)]" />}
-            Ongoing ({activeMeetings.length})
-          </button>
-          <button
-            onClick={() => setTab('SCHEDULED')}
-            className={clsx(
-              'px-4 py-2 rounded-xl text-xs md:text-sm font-medium transition-all',
-              tab === 'SCHEDULED'
-                ? 'bg-app-card2 text-app-text shadow-sm'
-                : 'text-app-mut hover:text-app-text'
-            )}
-          >
-            Upcoming ({scheduledMeetings.length})
-          </button>
-          <button
-            onClick={() => setTab('ENDED')}
-            className={clsx(
-              'px-4 py-2 rounded-xl text-xs md:text-sm font-medium transition-all',
-              tab === 'ENDED'
-                ? 'bg-app-card2 text-app-text shadow-sm'
-                : 'text-app-mut hover:text-app-text'
-            )}
-          >
-            Past ({endedMeetings.length})
-          </button>
-        </div>
-
-        <div className="text-xs text-app-mut">
-          Showing <span className="font-semibold text-app-text">{displayedMeetings.length}</span> meetings
-        </div>
-      </div>
-
-      {/* Main content grid: Meetings list + Side Column (Join by code + Schedule) */}
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-        {/* Left Column: Meetings Cards List */}
-        <div className="flex flex-col gap-4">
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {[1, 2, 3, 4].map(i => (
-                <div key={i} className="card h-48 animate-pulse bg-app-card/60" />
-              ))}
+            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-orange)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
+              <Video className="w-8 h-8 fill-current" />
             </div>
-          ) : displayedMeetings.length === 0 ? (
-            <div className="card p-12 text-center flex flex-col items-center justify-center border-dashed">
-              <div className="w-14 h-14 rounded-2xl bg-app-card2 grid place-items-center mb-4 text-app-mut">
-                <Video className="w-7 h-7" />
-              </div>
-              <h3 className="font-semibold text-lg text-app-text mb-1">No meetings found</h3>
-              <p className="text-app-mut text-sm max-w-sm mb-6">
-                {tab === 'all'
-                  ? 'Get started by creating your first AI-assisted video meeting room.'
-                  : `No meetings in '${tab.toLowerCase()}' status.`}
-              </p>
-              <button onClick={openCreateMeeting} className="btn">
-                <Plus className="w-4 h-4" /> Create meeting
+            <span className="text-xs font-medium text-[var(--text-primary)]">New meeting</span>
+          </button>
+
+          {/* 2. Join (Blue) */}
+          <button
+            onClick={() => {
+              const code = prompt('Enter meeting code:')
+              if (code) nav(`/join/${code.trim()}`)
+            }}
+            className="flex flex-col items-center gap-2 group cursor-pointer"
+          >
+            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
+              <Plus className="w-8 h-8 stroke-[2.5]" />
+            </div>
+            <span className="text-xs font-medium text-[var(--text-primary)]">Join</span>
+          </button>
+
+          {/* 3. Schedule (Blue) */}
+          <button
+            onClick={openCreateMeeting}
+            className="flex flex-col items-center gap-2 group cursor-pointer"
+          >
+            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
+              <Calendar className="w-7 h-7" />
+            </div>
+            <span className="text-xs font-medium text-[var(--text-primary)]">Schedule</span>
+          </button>
+
+          {/* 4. Share Screen (Blue) */}
+          <button
+            onClick={() => alert('Screen share will be initiated inside meeting room.')}
+            className="flex flex-col items-center gap-2 group cursor-pointer"
+          >
+            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
+              <ScreenShare className="w-7 h-7" />
+            </div>
+            <span className="text-xs font-medium text-[var(--text-primary)]">Share screen</span>
+          </button>
+
+          {/* 5. My Notes (Blue) */}
+          <button
+            onClick={() => nav('/notes')}
+            className="flex flex-col items-center gap-2 group cursor-pointer"
+          >
+            <div className="w-[62px] h-[62px] rounded-2xl bg-[var(--zoom-blue)] hover:brightness-110 flex items-center justify-center text-white shadow-md transition-transform group-hover:scale-105">
+              <FileText className="w-7 h-7" />
+            </div>
+            <span className="text-xs font-medium text-[var(--text-primary)]">My notes</span>
+          </button>
+        </div>
+
+        {/* Meeting Cards List ("Today" section from Image 1) */}
+        <div className="max-w-[560px] w-full mx-auto px-4 pb-8 flex-1">
+          <div className="flex items-center justify-between py-2 text-xs font-semibold text-[var(--text-primary)]">
+            <span className="flex items-center gap-1 cursor-pointer">
+              Today <ChevronDown className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            </span>
+            <div className="flex items-center gap-2 text-[var(--text-muted)]">
+              <button onClick={loadMeetings} className="hover:text-[var(--text-primary)] p-1 rounded">
+                <RefreshCw className="w-3 h-3" />
               </button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {displayedMeetings.map(m => {
-                const isLive = m.status === 'ACTIVE'
-                const isEnded = m.status === 'ENDED'
+          </div>
 
+          <div className="flex flex-col gap-3 mt-1">
+            {loading ? (
+              <div className="p-8 text-center text-xs text-[var(--text-muted)]">Loading meetings...</div>
+            ) : meetings.length === 0 ? (
+              <div className="p-8 border border-[var(--card-border)] rounded-xl text-center bg-[var(--card-bg)]">
+                <p className="text-xs text-[var(--text-secondary)]">No meetings scheduled for today</p>
+                <button
+                  onClick={openCreateMeeting}
+                  className="mt-3 text-xs text-[var(--zoom-blue)] font-semibold hover:underline"
+                >
+                  + Create a meeting
+                </button>
+              </div>
+            ) : (
+              meetings.map(m => {
+                const isLive = m.status === 'ACTIVE'
                 return (
                   <div
                     key={m.id}
-                    onClick={() => nav(`/meetings/${m.id}`)}
-                    className={clsx(
-                      'card-interactive p-5 flex flex-col justify-between cursor-pointer relative overflow-hidden group',
-                      isLive &&
-                        'bg-gradient-to-br from-[#1E2750] via-app-card to-app-card border-[var(--blue)] shadow-md shadow-blue-900/20'
-                    )}
+                    className="p-4 rounded-xl border border-[var(--card-border)] bg-[var(--card-bg)] shadow-xs flex flex-col gap-2 hover:border-[var(--zoom-blue)] transition-colors relative"
                   >
-                    {/* Top status & time */}
-                    <div>
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <span className="inline-flex items-center gap-1.5 text-xs text-app-mut">
-                          <Clock className="w-3.5 h-3.5" />
-                          {formatDate(m.created_at)}
-                        </span>
-                        {isLive ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-rose-500/15 text-[var(--red)] border border-rose-500/30 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 rounded-full bg-[var(--red)] animate-pulse" />
-                            Live
-                          </span>
-                        ) : isEnded ? (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-500/10 text-app-mut border border-app-line">
-                            Concluded
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/15 text-amber-400 border border-amber-500/30">
-                            Scheduled
-                          </span>
-                        )}
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <h4 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
+                          {m.title}
+                          {isLive && (
+                            <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider bg-rose-50 dark:bg-rose-950/40 px-1.5 py-0.5 rounded">
+                              Live Now
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                          Today, 1:00 - 2:00 PM · Host: {user?.name || 'You'} · 14 invitees
+                        </p>
                       </div>
 
-                      <h3 className="text-lg font-bold text-app-text group-hover:text-[var(--blue)] transition-colors line-clamp-1 mb-1.5">
-                        {m.title}
-                      </h3>
-                      {m.description && (
-                        <p className="text-xs text-app-mut line-clamp-2 mb-4 leading-relaxed">
-                          {m.description}
-                        </p>
-                      )}
+                      <button className="text-[var(--text-muted)] hover:text-[var(--text-primary)] p-1">
+                        <MoreHorizontal className="w-4 h-4" />
+                      </button>
                     </div>
 
-                    {/* Bottom avatars & action buttons */}
-                    <div className="pt-4 border-t border-app-line flex items-center justify-between gap-3 mt-4">
-                      {/* Avatar stack matching mockup */}
-                      <div className="flex -space-x-2 overflow-hidden items-center">
-                        <div className="w-7 h-7 rounded-full bg-emerald-500 text-[#0E111B] text-[10px] font-bold grid place-items-center border-2 border-app-card">
-                          RS
+                    {/* Participant Avatars & Join Button */}
+                    <div className="flex items-center justify-between pt-2 mt-1">
+                      <div className="flex items-center gap-2">
+                        <div className="flex -space-x-1.5 overflow-hidden">
+                          <div className="w-5 h-5 rounded-full bg-emerald-500 text-white font-bold text-[8px] grid place-items-center border border-white">
+                            RS
+                          </div>
+                          <div className="w-5 h-5 rounded-full bg-amber-400 text-white font-bold text-[8px] grid place-items-center border border-white">
+                            KM
+                          </div>
                         </div>
-                        <div className="w-7 h-7 rounded-full bg-amber-400 text-[#0E111B] text-[10px] font-bold grid place-items-center border-2 border-app-card">
-                          KM
-                        </div>
-                        <div className="w-7 h-7 rounded-full bg-sky-400 text-[#0E111B] text-[10px] font-bold grid place-items-center border-2 border-app-card">
-                          DP
-                        </div>
+                        <span className="text-[11px] text-[var(--text-secondary)]">2 joined</span>
                       </div>
 
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-2">
                         <button
-                          onClick={e => copyMeetingLink(e, m)}
-                          title="Copy guest link"
-                          className="p-2 rounded-xl bg-app-card2 text-app-mut hover:text-app-text border border-app-line transition-colors"
+                          onClick={() => nav(`/meetings/${m.id}`)}
+                          className="px-3 py-1 rounded-md text-xs font-medium text-[var(--text-secondary)] hover:bg-black/5 dark:hover:bg-white/5"
                         >
-                          {copiedId === m.id ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-400" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
+                          Details
                         </button>
-
-                        {isEnded ? (
-                          <button
-                            onClick={e => handleSummarize(e, m.id)}
-                            disabled={summaryLoading === m.id}
-                            className="btn btn-ghost py-1.5 px-3 text-xs"
-                          >
-                            <FileText className="w-3.5 h-3.5 text-app-blue" />
-                            <span>{summaryLoading === m.id ? 'Loading…' : 'AI Summary'}</span>
-                          </button>
-                        ) : (
-                          <button
-                            onClick={e => handleStartOrJoinVideo(e, m)}
-                            disabled={startingVideoId === m.id}
-                            className={clsx(
-                              'btn py-1.5 px-3.5 text-xs font-semibold',
-                              isLive ? 'bg-[var(--blue)]' : 'bg-app-card2 border border-app-line hover:border-app-blue'
-                            )}
-                          >
-                            <Video className="w-3.5 h-3.5" />
-                            <span>{startingVideoId === m.id ? 'Connecting…' : isLive ? 'Join now' : 'Start'}</span>
-                          </button>
-                        )}
+                        <button
+                          onClick={() => handleStartOrJoinVideo(m)}
+                          disabled={startingVideoId === m.id}
+                          className="px-4 py-1.5 rounded-md text-xs font-semibold text-white bg-[var(--zoom-blue)] hover:bg-[var(--zoom-hover)] shadow-xs transition-colors flex items-center gap-1.5"
+                        >
+                          <Video className="w-3.5 h-3.5" />
+                          <span>{startingVideoId === m.id ? 'Connecting…' : 'Join'}</span>
+                        </button>
                       </div>
                     </div>
                   </div>
                 )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Right Column: Quick Join & Today's Schedule */}
-        <div className="flex flex-col gap-5">
-          {/* Join with a code card */}
-          <div className="card p-5 flex flex-col gap-3">
-            <h4 className="font-bold text-base text-app-text flex items-center gap-2">
-              <Hash className="w-4 h-4 text-[var(--blue)]" />
-              Join with a code
-            </h4>
-            <p className="text-xs text-app-mut">
-              Enter the room code shared by the host to jump directly into the video conference.
-            </p>
-            <form onSubmit={handleJoinByCode} className="flex gap-2 mt-1">
-              <input
-                type="text"
-                placeholder="e.g. abc-defg-hij"
-                value={joinCodeInput}
-                onChange={e => setJoinCodeInput(e.target.value)}
-                className="input font-mono text-sm py-2"
-              />
-              <button type="submit" className="btn px-4 shrink-0">
-                Join
-              </button>
-            </form>
-            {joinCodeError && (
-              <span className="text-xs text-[var(--red)]">{joinCodeError}</span>
+              })
             )}
-          </div>
-
-          {/* Quick Schedule widget */}
-          <div className="card p-5 flex flex-col gap-3">
-            <div className="flex items-center justify-between">
-              <h4 className="font-bold text-base text-app-text">Today's Agenda</h4>
-              <span className="text-xs bg-app-card2 px-2 py-0.5 rounded-full text-app-mut">
-                {scheduledMeetings.length + activeMeetings.length} sessions
-              </span>
-            </div>
-
-            <div className="flex flex-col divide-y divide-app-line mt-1">
-              <div className="flex items-center gap-3 py-3">
-                <span className="text-xs font-mono font-bold text-app-blue w-14 shrink-0">10:00 AM</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-app-text truncate">Sprint Review & Demo</p>
-                  <p className="text-[11px] text-app-mut">Host: You</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 py-3">
-                <span className="text-xs font-mono font-semibold text-app-mut w-14 shrink-0">12:30 PM</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-app-text truncate">Design System Sync</p>
-                  <p className="text-[11px] text-app-mut">With UI/UX Team</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 py-3">
-                <span className="text-xs font-mono font-semibold text-app-mut w-14 shrink-0">03:00 PM</span>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-app-text truncate">Client Q&A Live Call</p>
-                  <p className="text-[11px] text-app-mut">AI Duplicate filter enabled</p>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
-      {/* Summary Modal */}
-      {summary && (
-        <SummaryModal
-          summary={summary}
-          onClose={() => setSummary(null)}
-          onRegenerate={async () => {
-            const r = await summaryApi.get(summary.meeting_id, true)
-            setSummary(r.data)
-          }}
-        />
-      )}
+      {/* ── RIGHT PANE: ZOOM AI COMPANION (Exact Replica of Image 1 Right Side) ── */}
+      <div className="w-[380px] shrink-0 h-full flex flex-col bg-[var(--sidebar-bg)] border-l border-[var(--sidebar-border)] select-none">
+        {/* AI Top Bar */}
+        <div className="h-[44px] px-4 border-b border-[var(--sidebar-border)] flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
+            <Sparkles className="w-3.5 h-3.5 text-[var(--zoom-blue)]" />
+            <span>AI Companion</span>
+          </div>
+          <span className="text-[11px] text-[var(--text-muted)]">MeetAI Intelligence</span>
+        </div>
+
+        {/* AI Conversation Scroll */}
+        <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scroll text-xs">
+          {aiChatMessages.map(msg => (
+            <div key={msg.id} className="flex flex-col gap-1">
+              {msg.sender === 'ai' ? (
+                <div className="flex flex-col gap-1.5 bg-white dark:bg-[#1E222B] p-3.5 rounded-xl border border-[var(--sidebar-border)] shadow-xs">
+                  {/* Thought process disclosure tag */}
+                  {msg.thought && (
+                    <div className="text-[10px] text-[var(--zoom-blue)] font-semibold flex items-center justify-between border-b border-[var(--sidebar-border)] pb-1.5 mb-1">
+                      <span className="flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" /> Thought process
+                      </span>
+                      <span className="text-[var(--text-muted)] hover:underline cursor-pointer">
+                        Show details
+                      </span>
+                    </div>
+                  )}
+
+                  <p className="text-[var(--text-primary)] leading-relaxed text-xs">
+                    {msg.text}
+                  </p>
+
+                  <div className="flex items-center justify-between pt-2 text-[var(--text-muted)] text-[10px]">
+                    <div className="flex items-center gap-2">
+                      <button className="hover:text-[var(--text-primary)]"><ThumbsUp className="w-3 h-3" /></button>
+                      <button className="hover:text-[var(--text-primary)]"><ThumbsDown className="w-3 h-3" /></button>
+                    </div>
+                    <span>{msg.time}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="self-end max-w-[85%] bg-[var(--zoom-blue)] text-white p-2.5 rounded-xl text-xs leading-relaxed">
+                  {msg.text}
+                  <div className="text-[9px] text-white/70 text-right mt-1">{msg.time}</div>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* AI Input Composer (Image 1 Bottom) */}
+        <form onSubmit={handleSendAiPrompt} className="p-3 border-t border-[var(--sidebar-border)] bg-[var(--window-bg)]">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Write a message or type '/' for more"
+              value={aiChatInput}
+              onChange={e => setAiChatInput(e.target.value)}
+              className="w-full bg-[var(--sidebar-bg)] border border-[var(--sidebar-border)] rounded-lg pl-3 pr-10 py-2 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] outline-none focus:border-[var(--zoom-blue)]"
+            />
+            <button
+              type="submit"
+              disabled={!aiChatInput.trim()}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[var(--zoom-blue)] disabled:text-[var(--text-muted)]"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </div>
+          <p className="text-[9px] text-[var(--text-muted)] text-center mt-2">
+            AI can make mistakes. Review for accuracy.
+          </p>
+        </form>
+      </div>
     </div>
   )
 }

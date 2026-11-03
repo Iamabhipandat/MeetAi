@@ -11,6 +11,7 @@ import SearchPage from './pages/SearchPage'
 import AnalyticsPage from './pages/AnalyticsPage'
 import RoomPage from './pages/RoomPage'
 import JoinPage from './pages/JoinPage'
+import NotesPage from './pages/NotesPage'
 
 export default function App() {
   return (
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="/meetings/:id" element={<MeetingDetailPage />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/notes" element={<NotesPage />} />
             </Route>
 
             <Route path="*" element={<Navigate to="/" replace />} />

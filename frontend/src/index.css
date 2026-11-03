@@ -2,30 +2,32 @@
 
 @layer base {
   :root {
-    --bg: #0E111B;
-    --side: #131826;
-    --card: #1A2033;
-    --card2: #222A42;
-    --line: #2B3454;
-    --text: #EEF1FB;
-    --mut: #8D97B8;
-    --blue: #3B6BFF;
-    --green: #3DDC97;
-    --red: #F0475B;
-    --r: 16px;
+    --bg-desktop: #2E5A88; /* fallback or nature photo */
+    --window-bg: #FFFFFF;
+    --sidebar-bg: #F7F8FA;
+    --sidebar-border: #E8EAED;
+    --card-bg: #FFFFFF;
+    --card-border: #E5E7EB;
+    --text-primary: #111827;
+    --text-secondary: #6B7280;
+    --text-muted: #9CA3AF;
+    --zoom-blue: #0E71EB;
+    --zoom-orange: #FF7426;
+    --zoom-hover: #0C60C7;
   }
 
-  .light {
-    --bg: #F4F6FC;
-    --side: #FFFFFF;
-    --card: #FFFFFF;
-    --card2: #F0F3FA;
-    --line: #E2E8F4;
-    --text: #0E111B;
-    --mut: #687494;
-    --blue: #3B6BFF;
-    --green: #10B981;
-    --red: #EF4444;
+  .dark {
+    --window-bg: #1A1D24;
+    --sidebar-bg: #14161C;
+    --sidebar-border: #262A34;
+    --card-bg: #1E222B;
+    --card-border: #2D323E;
+    --text-primary: #F3F4F6;
+    --text-secondary: #9CA3AF;
+    --text-muted: #6B7280;
+    --zoom-blue: #0E71EB;
+    --zoom-orange: #FF7426;
+    --zoom-hover: #0C60C7;
   }
 
   * {
@@ -36,120 +38,24 @@
   html, body, #root {
     height: 100%;
     width: 100%;
+    overflow: hidden;
   }
 
   body {
-    background-color: var(--bg);
-    color: var(--text);
-    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
-    transition: background-color 0.2s, color 0.2s;
+    background-color: #1a2a3a;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--text-primary);
     -webkit-font-smoothing: antialiased;
-  }
-
-  ::selection {
-    background: rgba(59, 107, 255, 0.3);
   }
 }
 
 @layer utilities {
-  .bg-app-bg { background-color: var(--bg); }
-  .bg-app-side { background-color: var(--side); }
-  .bg-app-card { background-color: var(--card); }
-  .bg-app-card2 { background-color: var(--card2); }
-  .border-app-line { border-color: var(--line); }
-  .text-app-text { color: var(--text); }
-  .text-app-mut { color: var(--mut); }
-  .text-app-blue { color: var(--blue); }
-  .text-app-green { color: var(--green); }
-  .text-app-red { color: var(--red); }
-
-  .card {
-    background-color: var(--card);
-    border: 1px solid var(--line);
-    border-radius: var(--r);
-  }
-
-  .card-interactive {
-    background-color: var(--card);
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  }
-  .card-interactive:hover {
-    border-color: var(--blue);
-    transform: translateY(-2px);
-    box-shadow: 0 12px 28px -8px rgba(0, 0, 0, 0.35);
-  }
-
-  .input {
-    background-color: var(--bg);
-    border: 1px solid var(--line);
+  .zoom-window {
+    background-color: var(--window-bg);
     border-radius: 12px;
-    color: var(--text);
-    font-size: 0.875rem;
-    padding: 0.65rem 0.95rem;
-    width: 100%;
-    outline: none;
-    transition: border-color 0.15s, box-shadow 0.15s;
-  }
-  .input:focus {
-    border-color: var(--blue);
-    box-shadow: 0 0 0 3px rgba(59, 107, 255, 0.25);
-  }
-  .input::placeholder {
-    color: var(--mut);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.15);
   }
 
-  .btn {
-    padding: 9px 18px;
-    border-radius: 12px;
-    background: var(--blue);
-    color: #ffffff;
-    font-weight: 600;
-    font-size: 0.875rem;
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: center;
-    border: 0;
-    cursor: pointer;
-    transition: filter 0.15s, transform 0.1s;
-  }
-  .btn:hover {
-    filter: brightness(1.12);
-  }
-  .btn:active {
-    transform: scale(0.98);
-  }
-  .btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    filter: none;
-  }
-
-  .btn-ghost {
-    background: var(--card);
-    border: 1px solid var(--line);
-    color: var(--text);
-  }
-  .btn-ghost:hover {
-    background: var(--card2);
-    border-color: var(--mut);
-    filter: none;
-  }
-
-  .btn-red {
-    background: var(--red);
-    color: #ffffff;
-  }
-
-  .btn-green {
-    background: var(--green);
-    color: #0E111B;
-    font-weight: 700;
-  }
-
-  /* Scrollbar */
   .custom-scroll::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -158,10 +64,10 @@
     background: transparent;
   }
   .custom-scroll::-webkit-scrollbar-thumb {
-    background: var(--line);
+    background: rgba(150, 150, 150, 0.25);
     border-radius: 99px;
   }
   .custom-scroll::-webkit-scrollbar-thumb:hover {
-    background: var(--mut);
+    background: rgba(150, 150, 150, 0.4);
   }
 }
