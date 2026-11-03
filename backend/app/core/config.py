@@ -6,15 +6,15 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "MeetAI"
     API_V1_STR: str = "/api"
 
-    # Direct DB URL override (SQLite for local dev)
-    DATABASE_URL: Optional[str] = None
+    # Direct DB URL override (SQLite for local dev or default standalone)
+    DATABASE_URL: Optional[str] = "sqlite:///./meetai.db"
 
-    # PostgreSQL Settings (used if DATABASE_URL not set)
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "password"
-    POSTGRES_SERVER: str = "localhost"
-    POSTGRES_PORT: str = "5432"
-    POSTGRES_DB: str = "meeting_assistant"
+    # PostgreSQL Settings (optional, only used if postgres environment provided)
+    POSTGRES_USER: Optional[str] = None
+    POSTGRES_PASSWORD: Optional[str] = None
+    POSTGRES_SERVER: Optional[str] = None
+    POSTGRES_PORT: Optional[str] = "5432"
+    POSTGRES_DB: Optional[str] = None
 
     # Security
     SECRET_KEY: str = "your-super-secret-key-change-in-production"
@@ -37,16 +37,19 @@ class Settings(BaseSettings):
 
     @property
     def SQLALCHEMY_DATABASE_URI(self) -> str:
+        # If explicit postgres user & server configured, use postgresql+psycopg2
+        if self.POSTGRES_USER and self.POSTGRES_SERVER and self.POSTGRES_DB:
+            return (
+                f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+        # Handle postgresql:// scheme to ensure psycopg2 dialect is used if given in DATABASE_URL
         if self.DATABASE_URL:
+            if self.DATABASE_URL.startswith("postgresql://"):
+                return self.DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
             return self.DATABASE_URL
-        return (
-            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
-            f"@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-        )
+        return "sqlite:///./meetai.db"
 
     class Config:
         env_file = ".env"
         case_sensitive = True
-
-
-settings = Settings()
